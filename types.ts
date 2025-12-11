@@ -1,3 +1,4 @@
+
 export enum ClassType {
   INGENIEUR = 'Ingénieur',
   MIND = 'MIND',
@@ -9,13 +10,11 @@ export interface User {
   firstName: string;
   lastName: string;
   classType: ClassType;
-  groupId?: number | null; // Added to track group in flat list
-  votes?: number;
+  groupId?: number | null;
 }
 
 export interface Member extends User {
-  isLeader?: boolean;
-  votesReceived?: number;
+  isLeader: boolean;
 }
 
 export interface Group {
@@ -32,7 +31,15 @@ export const QUOTAS = {
 
 export const TOTAL_GROUPS = 9;
 
-// Updated Timeline Dates (Assuming 2025 for the upcoming challenge)
-export const CORE_TEAM_DEADLINE = new Date('2025-02-01T00:00:00'); 
-export const DEADLINE_DATE = new Date('2025-03-01T00:00:00'); // Start of Vote Phase
-export const CHALLENGE_START = new Date('2025-03-23T00:00:00');
+// Default dates used if not found in database
+export const DEFAULT_CORE_TEAM_DEADLINE = new Date('2026-02-01T00:00:00'); 
+export const DEFAULT_CONSOLIDATION_DEADLINE = new Date('2026-03-15T00:00:00'); // End of Phase 2 (Group Lock)
+export const DEFAULT_LEADER_LOCK_DATE = new Date('2026-03-23T00:00:00'); // End of Phase 3 (Leader Lock)
+export const DEFAULT_CHALLENGE_START = new Date('2026-03-23T00:00:00'); // Phase 4 Start
+
+export interface AppConfig {
+  coreTeamDeadline: Date;
+  consolidationDeadline: Date;
+  leaderLockDate: Date;
+  challengeStart: Date;
+}

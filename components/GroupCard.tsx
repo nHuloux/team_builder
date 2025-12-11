@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { Group, User, ClassType, QUOTAS, Member, DEADLINE_DATE } from '../types';
+import { Group, User, ClassType, QUOTAS } from '../types';
 import { Button } from './Button';
 import { canJoinGroup } from '../services/storage';
 import { Users, Crown } from 'lucide-react';
@@ -9,7 +10,9 @@ interface GroupCardProps {
   allGroups: Group[];
   currentUser: User;
   onJoin: (groupId: number) => void;
-  onVote?: (groupId: number, candidateId: string) => void;
+  onAssignLeader: (groupId: number, memberId: string) => void;
+  groupLockDate: Date;
+  leaderLockDate: Date;
 }
 
 export const GroupCard: React.FC<GroupCardProps> = ({ 
@@ -17,11 +20,18 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   allGroups, 
   currentUser, 
   onJoin,
-  onVote
+  onAssignLeader,
+  groupLockDate,
+  leaderLockDate
 }) => {
   const userInGroup = group.members.some(m => m.id === currentUser.id);
   const permission = canJoinGroup(allGroups, group.id, currentUser.classType);
-  const isVotePhase = new Date() > DEADLINE_DATE;
+  
+  const now = new Date();
+  // Leader selection is open until the leader lock date (Phase 3 end)
+  const isLeaderSelectionOpen = now <= leaderLockDate;
+  // Group modification is locked after the group lock date (Phase 2 end)
+  const isGroupLocked = now > groupLockDate;
   
   // Calculate counts
   const counts = {
@@ -31,13 +41,6 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   };
 
   const isFull = (type: ClassType) => counts[type] >= QUOTAS[type];
-  
-  // Calculate highest vote getter for leader display
-  const leader = isVotePhase 
-    ? group.members.reduce((prev, current) => (prev.votesReceived || 0) > (current.votesReceived || 0) ? prev : current, group.members[0])
-    : null;
-    
-  const hasLeader = leader && (leader.votesReceived || 0) > 0;
 
   return (
     <div className={`flex flex-col h-full bg-white rounded-xl shadow-sm border ${userInGroup ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-200'}`}>
@@ -82,19 +85,28 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                   <span className="truncate">{member.firstName} {member.lastName}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-gray-400 bg-white border border-gray-200 px-1 rounded">{member.classType.slice(0,3)}</span>
-                    {/* Voting Logic */}
-                    {isVotePhase && userInGroup && member.id !== currentUser.id && onVote && (
+                    
+                    {/* Leader Management */}
+                    {member.isLeader ? (
+                       // Active Leader
                        <button 
-                        onClick={() => onVote(group.id, member.id)}
-                        className="text-gray-400 hover:text-yellow-500 transition-colors"
-                        title="Voter pour le chef"
+                         disabled={!userInGroup || !isLeaderSelectionOpen}
+                         title={isLeaderSelectionOpen && userInGroup ? "Chef d'équipe (cliquer pour changer)" : "Chef d'équipe"}
+                         className={`${isLeaderSelectionOpen && userInGroup ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'}`}
                        >
-                         <Crown className="h-3 w-3" />
+                         <Crown className="h-4 w-4 text-yellow-500 fill-yellow-500" />
                        </button>
-                    )}
-                    {/* Leader Badge */}
-                    {hasLeader && leader?.id === member.id && (
-                        <Crown className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+                    ) : (
+                      // Not Leader - Click to Assign (only if in group and dates are valid)
+                      userInGroup && isLeaderSelectionOpen && (
+                         <button 
+                           onClick={() => onAssignLeader(group.id, member.id)}
+                           className="text-gray-200 hover:text-yellow-500 transition-colors"
+                           title="Désigner comme chef"
+                         >
+                           <Crown className="h-4 w-4" />
+                         </button>
+                      )
                     )}
                   </div>
                 </li>
@@ -105,32 +117,45 @@ export const GroupCard: React.FC<GroupCardProps> = ({
       </div>
 
       <div className="p-4 bg-gray-50 rounded-b-xl border-t border-gray-100">
-        {!isVotePhase ? (
-          !userInGroup ? (
-            <div className="space-y-2">
-              <Button 
-                onClick={() => onJoin(group.id)} 
-                className="w-full"
-                disabled={!permission.allowed}
-                variant={permission.allowed ? 'primary' : 'secondary'}
-              >
-                {permission.allowed ? "Rejoindre l'équipe" : 'Verrouillé'}
-              </Button>
-              {!permission.allowed && (
-                 <p className="text-[10px] text-red-500 text-center leading-tight">
-                   {permission.reason}
-                 </p>
+        {!userInGroup ? (
+          <div className="space-y-2">
+            <Button 
+              onClick={() => onJoin(group.id)} 
+              className="w-full"
+              disabled={!permission.allowed || isGroupLocked}
+              variant={permission.allowed && !isGroupLocked ? 'primary' : 'secondary'}
+            >
+              {isGroupLocked 
+                ? "Constitution terminée" 
+                : (permission.allowed ? "Rejoindre l'équipe" : 'Verrouillé')
+              }
+            </Button>
+            {!permission.allowed && !isGroupLocked && (
+                <p className="text-[10px] text-red-500 text-center leading-tight">
+                  {permission.reason}
+                </p>
+            )}
+            {isGroupLocked && (
+               <p className="text-[10px] text-gray-500 text-center leading-tight">
+                  La phase de consolidation est terminée. Les équipes sont figées.
+               </p>
+            )}
+          </div>
+        ) : (
+            <div className="flex flex-col items-center justify-center space-y-1 py-1">
+              <span className="text-sm font-medium text-indigo-700">
+                C'est votre équipe
+              </span>
+              {isLeaderSelectionOpen ? (
+                <span className="text-[10px] text-gray-500">
+                  Cliquez sur une couronne pour désigner le chef.
+                </span>
+              ) : (
+                <span className="text-[10px] text-red-500 font-medium">
+                  Sélection du chef clôturée.
+                </span>
               )}
             </div>
-          ) : (
-             <div className="text-center text-sm font-medium text-indigo-700 py-2">
-               Équipe actuelle
-             </div>
-          )
-        ) : (
-          <div className="text-center text-xs text-gray-500 font-medium">
-             Phase de vote active
-          </div>
         )}
       </div>
     </div>

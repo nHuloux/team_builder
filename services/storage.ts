@@ -1,4 +1,5 @@
-import { Group, User, Member, TOTAL_GROUPS, ClassType, QUOTAS } from '../types';
+
+import { Group, User, Member, TOTAL_GROUPS, ClassType, QUOTAS, AppConfig, DEFAULT_CORE_TEAM_DEADLINE, DEFAULT_CONSOLIDATION_DEADLINE, DEFAULT_LEADER_LOCK_DATE, DEFAULT_CHALLENGE_START } from '../types';
 import { supabase } from './supabaseClient';
 
 const STORAGE_KEY_CURRENT_USER = 'teambuilder_current_user';
@@ -10,8 +11,8 @@ interface DBUser {
   last_name: string;
   class_type: string;
   group_id: number | null;
-  votes: number;
-  password?: string; // Added password field
+  password?: string;
+  is_leader?: boolean;
 }
 
 // --- Core Service Logic ---
@@ -35,8 +36,7 @@ const transformUsersToGroups = (users: DBUser[]): Group[] => {
         lastName: u.last_name,
         classType: u.class_type as ClassType,
         groupId: u.group_id,
-        votesReceived: u.votes || 0,
-        isLeader: false // Calculated dynamically in UI based on votes
+        isLeader: u.is_leader || false
       };
       groups[groupIndex].members.push(member);
     }
@@ -61,6 +61,78 @@ export const fetchGroups = async (): Promise<Group[]> => {
   } catch (error) {
     console.error("Failed to fetch groups:", error);
     return [];
+  }
+};
+
+// FETCH APP CONFIG
+export const fetchAppConfig = async (): Promise<AppConfig> => {
+  try {
+    // Try to fetch from a 'challenge_config' table
+    // Expected structure: key (text), value (text)
+    const { data, error } = await supabase
+      .from('challenge_config')
+      .select('key, value');
+
+    if (error || !data) {
+      console.warn("Could not fetch config (table might not exist), using defaults.");
+      return {
+        coreTeamDeadline: DEFAULT_CORE_TEAM_DEADLINE,
+        consolidationDeadline: DEFAULT_CONSOLIDATION_DEADLINE,
+        leaderLockDate: DEFAULT_LEADER_LOCK_DATE,
+        challengeStart: DEFAULT_CHALLENGE_START
+      };
+    }
+
+    const config: any = {};
+    data.forEach(row => {
+      if (row.key === 'CORE_TEAM_DEADLINE') config.coreTeamDeadline = new Date(row.value);
+      if (row.key === 'CONSOLIDATION_DEADLINE') config.consolidationDeadline = new Date(row.value);
+      // Fallback for old key name if migration hasn't run
+      if (row.key === 'LEADER_DEADLINE') config.consolidationDeadline = new Date(row.value);
+      
+      if (row.key === 'LEADER_LOCK_DATE') config.leaderLockDate = new Date(row.value);
+      if (row.key === 'CHALLENGE_START') config.challengeStart = new Date(row.value);
+    });
+
+    return {
+      coreTeamDeadline: config.coreTeamDeadline || DEFAULT_CORE_TEAM_DEADLINE,
+      consolidationDeadline: config.consolidationDeadline || DEFAULT_CONSOLIDATION_DEADLINE,
+      leaderLockDate: config.leaderLockDate || DEFAULT_LEADER_LOCK_DATE,
+      challengeStart: config.challengeStart || DEFAULT_CHALLENGE_START
+    };
+
+  } catch (e) {
+    return {
+      coreTeamDeadline: DEFAULT_CORE_TEAM_DEADLINE,
+      consolidationDeadline: DEFAULT_CONSOLIDATION_DEADLINE,
+      leaderLockDate: DEFAULT_LEADER_LOCK_DATE,
+      challengeStart: DEFAULT_CHALLENGE_START
+    };
+  }
+};
+
+// UPDATE APP CONFIG
+export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
+  try {
+    const updates = [
+      { key: 'CORE_TEAM_DEADLINE', value: config.coreTeamDeadline.toISOString() },
+      { key: 'CONSOLIDATION_DEADLINE', value: config.consolidationDeadline.toISOString() },
+      { key: 'LEADER_LOCK_DATE', value: config.leaderLockDate.toISOString() },
+      { key: 'CHALLENGE_START', value: config.challengeStart.toISOString() }
+    ];
+
+    const { error } = await supabase
+      .from('challenge_config')
+      .upsert(updates, { onConflict: 'key' });
+
+    if (error) {
+      console.error("Failed to update config:", error.message);
+      throw error;
+    }
+    return true;
+  } catch (e) {
+    console.error("Error updating config:", e);
+    return false;
   }
 };
 
@@ -90,19 +162,17 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
       
       // Check Password Logic
       if (existingUser.password) {
-        // If user has a password set, verify it
         if (existingUser.password !== password) {
            throw new Error("Mot de passe incorrect.");
         }
       } else {
-        // If user exists but has NO password (legacy user), set the password now
         await supabase
           .from('project_members')
           .update({ password: password })
           .eq('id', generatedId);
       }
 
-      // Update DB class_type to match current login if different (Keep profile fresh)
+      // Update DB class_type to match current login if different
       if (existingUser.class_type !== userCandidate.classType) {
          await supabase.from('project_members').update({ class_type: userCandidate.classType }).eq('id', generatedId);
       }
@@ -111,9 +181,8 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         id: existingUser.id,
         firstName: existingUser.first_name,
         lastName: existingUser.last_name,
-        classType: existingUser.class_type as ClassType, // Use DB value
-        groupId: existingUser.group_id,
-        votes: existingUser.votes
+        classType: existingUser.class_type as ClassType,
+        groupId: existingUser.group_id
       };
       
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
@@ -126,8 +195,8 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         last_name: userCandidate.lastName,
         class_type: userCandidate.classType,
         group_id: null,
-        votes: 0,
-        password: password
+        password: password,
+        is_leader: false
       };
 
       const { error: insertError } = await supabase
@@ -141,8 +210,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         firstName: newUser.first_name,
         lastName: newUser.last_name,
         classType: newUser.class_type as ClassType,
-        groupId: null,
-        votes: 0
+        groupId: null
       };
 
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
@@ -150,7 +218,6 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
     }
   } catch (error: any) {
     console.error("Login failed:", error);
-    // Pass through specific error messages
     if (error.message === "Mot de passe incorrect." || error.message === "Le mot de passe est requis.") {
       throw error;
     }
@@ -163,7 +230,7 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
   try {
     const { error } = await supabase
       .from('project_members')
-      .update({ group_id: groupId })
+      .update({ group_id: groupId, is_leader: false }) // Reset leader status when joining a new group
       .eq('id', userId);
 
     if (error) {
@@ -171,7 +238,6 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
       return false;
     }
 
-    // Update local session
     const currentUser = getCurrentUser();
     if (currentUser) {
       currentUser.groupId = groupId;
@@ -185,29 +251,36 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
   }
 };
 
-// VOTE
-export const voteForLeader = async (groupId: number, candidateId: string): Promise<boolean> => {
+// ASSIGN LEADER (TOGGLE CROWN)
+export const assignLeader = async (groupId: number, newLeaderId: string): Promise<boolean> => {
    try {
-    // 1. Get current votes
-    const { data: user, error: fetchError } = await supabase
+    // 1. Reset leader for everyone in this group
+    const { error: resetError } = await supabase
       .from('project_members')
-      .select('votes')
-      .eq('id', candidateId)
-      .single();
-      
-    if (fetchError || !user) return false;
+      .update({ is_leader: false })
+      .eq('group_id', groupId);
 
-    // 2. Increment
+    if (resetError) {
+        console.error("Error resetting leaders:", resetError.message, resetError.details);
+        throw new Error(resetError.message);
+    }
+
+    // 2. Set new leader
     const { error: updateError } = await supabase
       .from('project_members')
-      .update({ votes: (user.votes || 0) + 1 })
-      .eq('id', candidateId);
+      .update({ is_leader: true })
+      .eq('id', newLeaderId);
 
-    if (updateError) return false;
+    if (updateError) {
+        console.error("Error setting new leader:", updateError.message, updateError.details);
+        throw new Error(updateError.message);
+    }
 
     return true;
-   } catch (error) {
-     console.error("Vote failed:", error);
+   } catch (error: any) {
+     // Log the full error object structure for debugging
+     console.error("Assign leader failed (full object):", JSON.stringify(error, null, 2));
+     console.error("Assign leader failed (message):", error.message || error);
      return false;
    }
 };
@@ -222,7 +295,7 @@ export const getCurrentUser = (): User | null => {
   return data ? JSON.parse(data) : null;
 };
 
-// VALIDATION RULES (Pure logic, stays synchronous)
+// VALIDATION RULES
 export const canJoinGroup = (groups: Group[], groupId: number, userClass: ClassType): { allowed: boolean; reason?: string } => {
   const group = groups.find(g => g.id === groupId);
   if (!group) return { allowed: false, reason: 'Groupe non trouvé' };

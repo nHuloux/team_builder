@@ -1,53 +1,56 @@
+
 import React, { useState, useEffect } from 'react';
 import { Login } from './components/Login';
 import { GroupCard } from './components/GroupCard';
-import { User, Group, DEADLINE_DATE, CORE_TEAM_DEADLINE, CHALLENGE_START } from './types';
+import { User, Group, AppConfig, DEFAULT_CORE_TEAM_DEADLINE, DEFAULT_CONSOLIDATION_DEADLINE, DEFAULT_LEADER_LOCK_DATE, DEFAULT_CHALLENGE_START } from './types';
 import { 
   getCurrentUser, 
   logoutUser, 
   fetchGroups, 
   joinGroup, 
-  voteForLeader 
+  assignLeader,
+  fetchAppConfig,
+  updateAppConfig
 } from './services/storage';
-import { LogOut, Calendar, RefreshCw, CheckCircle2, Circle, ArrowRight } from 'lucide-react';
+import { LogOut, RefreshCw, CheckCircle2, Settings, X } from 'lucide-react';
 import { Button } from './components/Button';
 
 // --- Visual Process Component ---
-const TimelineVisual = () => {
+const TimelineVisual: React.FC<{ config: AppConfig }> = ({ config }) => {
   const now = new Date();
   
   const steps = [
     { 
       id: 1, 
       title: "Phase 1 : Constitution", 
-      date: "Jusqu'au 1er Fév", 
+      date: `Jusqu'au ${config.coreTeamDeadline.toLocaleDateString('fr-FR')}`, 
       desc: "Formation libre des équipes",
-      active: now < CORE_TEAM_DEADLINE,
-      completed: now >= CORE_TEAM_DEADLINE 
+      active: now < config.coreTeamDeadline,
+      completed: now >= config.coreTeamDeadline 
     },
     { 
       id: 2, 
       title: "Phase 2 : Consolidation", 
-      date: "1er Fév - 1er Mars", 
-      desc: "Noyaux validés / Affectation aléatoire",
-      active: now >= CORE_TEAM_DEADLINE && now < DEADLINE_DATE,
-      completed: now >= DEADLINE_DATE
+      date: `Jusqu'au ${config.consolidationDeadline.toLocaleDateString('fr-FR')}`, 
+      desc: "Équipes figées à la fin",
+      active: now >= config.coreTeamDeadline && now < config.consolidationDeadline,
+      completed: now >= config.consolidationDeadline
     },
     { 
       id: 3, 
-      title: "Phase 3 : Vote & Complétion", 
-      date: "1er Mars", 
-      desc: "Complétion finale et élection du Chef",
-      active: now >= DEADLINE_DATE && now < CHALLENGE_START,
-      completed: now >= CHALLENGE_START
+      title: "Phase 3 : Chef d'équipe", 
+      date: `Avant ${config.leaderLockDate.toLocaleDateString('fr-FR')}`, 
+      desc: "Désignation obligatoire du chef",
+      active: now >= config.consolidationDeadline && now < config.leaderLockDate,
+      completed: now >= config.leaderLockDate
     },
     { 
       id: 4, 
       title: "Phase 4 : Challenge", 
-      date: "23 Mars", 
+      date: config.challengeStart.toLocaleDateString('fr-FR'), 
       desc: "Lancement officiel",
-      active: now >= CHALLENGE_START,
-      completed: false // Final state
+      active: now >= config.challengeStart,
+      completed: now >= config.challengeStart // Show green check when started
     }
   ];
 
@@ -88,30 +91,138 @@ const TimelineVisual = () => {
   );
 };
 
+// --- Admin Modal Component ---
+const AdminModal: React.FC<{ 
+  isOpen: boolean; 
+  onClose: () => void; 
+  config: AppConfig;
+  onSave: (newConfig: AppConfig) => Promise<void>; 
+}> = ({ isOpen, onClose, config, onSave }) => {
+  const [formData, setFormData] = useState({
+    coreTeamDeadline: config.coreTeamDeadline.toISOString().split('T')[0],
+    consolidationDeadline: config.consolidationDeadline.toISOString().split('T')[0],
+    leaderLockDate: config.leaderLockDate.toISOString().split('T')[0],
+    challengeStart: config.challengeStart.toISOString().split('T')[0]
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+        setFormData({
+            coreTeamDeadline: config.coreTeamDeadline.toISOString().split('T')[0],
+            consolidationDeadline: config.consolidationDeadline.toISOString().split('T')[0],
+            leaderLockDate: config.leaderLockDate.toISOString().split('T')[0],
+            challengeStart: config.challengeStart.toISOString().split('T')[0]
+        });
+    }
+  }, [isOpen, config]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    await onSave({
+      coreTeamDeadline: new Date(formData.coreTeamDeadline),
+      consolidationDeadline: new Date(formData.consolidationDeadline),
+      leaderLockDate: new Date(formData.leaderLockDate),
+      challengeStart: new Date(formData.challengeStart)
+    });
+    setIsSaving(false);
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 overflow-y-auto max-h-[90vh]">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-gray-900">Administration Dates</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Fin Phase 1 (Constitution)</label>
+            <input 
+              type="date" 
+              required
+              className="w-full border border-gray-300 rounded-md px-3 py-2"
+              value={formData.coreTeamDeadline}
+              onChange={e => setFormData({...formData, coreTeamDeadline: e.target.value})}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Fin Phase 2 (Verrouillage Groupes)</label>
+            <input 
+              type="date" 
+              required
+              className="w-full border border-gray-300 rounded-md px-3 py-2"
+              value={formData.consolidationDeadline}
+              onChange={e => setFormData({...formData, consolidationDeadline: e.target.value})}
+            />
+            <p className="text-xs text-gray-500 mt-1">Les équipes sont figées après cette date.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Fin Phase 3 (Verrouillage Chefs)</label>
+            <input 
+              type="date" 
+              required
+              className="w-full border border-gray-300 rounded-md px-3 py-2"
+              value={formData.leaderLockDate}
+              onChange={e => setFormData({...formData, leaderLockDate: e.target.value})}
+            />
+            <p className="text-xs text-gray-500 mt-1">Date limite pour choisir le chef.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Début du Challenge</label>
+            <input 
+              type="date" 
+              required
+              className="w-full border border-gray-300 rounded-md px-3 py-2"
+              value={formData.challengeStart}
+              onChange={e => setFormData({...formData, challengeStart: e.target.value})}
+            />
+            <p className="text-xs text-gray-500 mt-1">Date de lancement officiel (Phase 4).</p>
+          </div>
+          <div className="pt-4 flex gap-3 justify-end">
+            <Button type="button" variant="secondary" onClick={onClose}>Annuler</Button>
+            <Button type="submit" isLoading={isSaving}>Enregistrer</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [currentUser, setUser] = useState<User | null>(null);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [isVotePhase, setIsVotePhase] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
+  const [appConfig, setAppConfig] = useState<AppConfig>({
+    coreTeamDeadline: DEFAULT_CORE_TEAM_DEADLINE,
+    consolidationDeadline: DEFAULT_CONSOLIDATION_DEADLINE,
+    leaderLockDate: DEFAULT_LEADER_LOCK_DATE,
+    challengeStart: DEFAULT_CHALLENGE_START
+  });
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
 
   // Initial Load
   useEffect(() => {
     const user = getCurrentUser();
     if (user) setUser(user);
-    
-    // Check Date for Vote Phase (Phase 3)
-    if (new Date() >= DEADLINE_DATE) {
-      setIsVotePhase(true);
-    }
-    
     loadData();
   }, []);
 
   const loadData = async () => {
     setIsLoading(true);
-    const data = await fetchGroups();
-    setGroups(data);
+    const [groupsData, configData] = await Promise.all([
+      fetchGroups(),
+      fetchAppConfig()
+    ]);
+    setGroups(groupsData);
+    setAppConfig(configData);
     setIsLoading(false);
   };
 
@@ -127,22 +238,49 @@ function App() {
 
   const handleJoinGroup = async (groupId: number) => {
     if (!currentUser) return;
+
+    // Phase 2 Constraint: No changes after consolidationDeadline
+    if (new Date() > appConfig.consolidationDeadline) {
+      alert("La phase de consolidation est terminée. Vous ne pouvez plus changer d'équipe.");
+      return;
+    }
+
     setIsActionLoading(true);
     const success = await joinGroup(currentUser.id, groupId);
     if (success) {
-      await loadData();
+      await loadData(); // Reloads groups and config
       // Update local user state specifically for UI consistency
       setUser({ ...currentUser, groupId }); 
     }
     setIsActionLoading(false);
   };
 
-  const handleVote = async (groupId: number, candidateId: string) => {
+  const handleAssignLeader = async (groupId: number, memberId: string) => {
+    // Phase 3 Constraint: Leader selection allowed until leaderLockDate
+    if (new Date() > appConfig.leaderLockDate) {
+        alert("La date limite pour désigner un chef est dépassée.");
+        return;
+    }
+    
     setIsActionLoading(true);
-    await voteForLeader(groupId, candidateId);
+    const success = await assignLeader(groupId, memberId);
+    if (!success) {
+      alert("Erreur lors de l'assignation du chef. Vérifiez la console pour plus de détails.");
+    }
     await loadData();
     setIsActionLoading(false);
   };
+
+  const handleUpdateConfig = async (newConfig: AppConfig) => {
+    const success = await updateAppConfig(newConfig);
+    if (success) {
+      setAppConfig(newConfig);
+    } else {
+      alert("Erreur lors de la mise à jour des dates.");
+    }
+  };
+
+  const isAdmin = currentUser?.firstName === 'Nicolas' && currentUser?.lastName === 'Huloux';
 
   if (!currentUser) {
     return <Login onLogin={handleLogin} />;
@@ -158,6 +296,18 @@ function App() {
           </div>
           
           <div className="flex items-center gap-4">
+            {isAdmin && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setIsAdminModalOpen(true)}
+                className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+              >
+                <Settings className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Admin Dates</span>
+              </Button>
+            )}
+
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium text-gray-900">{currentUser.firstName} {currentUser.lastName}</p>
               <p className="text-xs text-gray-500">{currentUser.classType}</p>
@@ -173,6 +323,14 @@ function App() {
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full relative">
         
+        {/* Admin Modal */}
+        <AdminModal 
+          isOpen={isAdminModalOpen}
+          onClose={() => setIsAdminModalOpen(false)}
+          config={appConfig}
+          onSave={handleUpdateConfig}
+        />
+
         {/* Loading Overlay for Actions */}
         {isActionLoading && (
           <div className="absolute inset-0 bg-white/50 z-20 flex items-center justify-center rounded-lg">
@@ -184,37 +342,7 @@ function App() {
         )}
 
         {/* Visual Timeline Process */}
-        <TimelineVisual />
-
-        {/* Info Banner */}
-        <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div className="space-y-2">
-             <h2 className="text-lg font-medium text-gray-900">
-               {isVotePhase ? "Phase 3 : Vote et Finalisation" : "Constitution des Équipes"}
-             </h2>
-             <p className="text-sm text-gray-600 max-w-3xl">
-               {isVotePhase 
-                 ? "La phase de constitution libre est terminée. Les équipes doivent être complètes. Discutez avec votre groupe et votez pour votre chef d'équipe." 
-                 : "Rejoignez une équipe. Attention : au 1er février (Phase 2), les équipes 'noyaux' (1 Ingénieur, 2 MIND, 3 CLIC) doivent être constituées, sinon l'affectation sera aléatoire pour les personnes restantes."}
-             </p>
-             <div className="flex items-center gap-2 text-xs text-indigo-600 font-medium bg-indigo-50 w-fit px-2 py-1 rounded">
-               <Calendar className="h-3 w-3" />
-               Prochaine échéance majeure : {
-                 new Date() < CORE_TEAM_DEADLINE 
-                   ? `1er Février (Noyaux)` 
-                   : (new Date() < DEADLINE_DATE ? "1er Mars (Vote)" : "23 Mars (Challenge)")
-               }
-             </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <button 
-              onClick={loadData}
-              className="text-xs text-gray-400 hover:text-gray-600 flex items-center justify-end gap-1"
-            >
-               <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} /> Actualiser
-            </button>
-          </div>
-        </div>
+        <TimelineVisual config={appConfig} />
 
         {/* Grid */}
         {isLoading && groups.length === 0 ? (
@@ -230,7 +358,9 @@ function App() {
                 allGroups={groups}
                 currentUser={currentUser}
                 onJoin={handleJoinGroup}
-                onVote={handleVote}
+                onAssignLeader={handleAssignLeader}
+                groupLockDate={appConfig.consolidationDeadline}
+                leaderLockDate={appConfig.leaderLockDate}
               />
             ))}
           </div>
