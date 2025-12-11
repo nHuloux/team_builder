@@ -11,6 +11,7 @@ interface DBUser {
   class_type: string;
   group_id: number | null;
   votes: number;
+  password?: string; // Added password field
 }
 
 // --- Core Service Logic ---
@@ -63,9 +64,14 @@ export const fetchGroups = async (): Promise<Group[]> => {
   }
 };
 
-// LOGIN / CREATE USER
-export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
+// LOGIN / CREATE USER WITH PASSWORD
+export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string): Promise<User> => {
   const generatedId = `${userCandidate.firstName.toLowerCase()}-${userCandidate.lastName.toLowerCase()}`.trim();
+  const password = passwordRaw.trim();
+
+  if (!password) {
+    throw new Error("Le mot de passe est requis.");
+  }
   
   try {
     // 1. Check if user exists
@@ -80,7 +86,22 @@ export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
     }
 
     if (existingUser) {
-      // User exists, update local storage and return
+      // 1a. User exists
+      
+      // Check Password Logic
+      if (existingUser.password) {
+        // If user has a password set, verify it
+        if (existingUser.password !== password) {
+           throw new Error("Mot de passe incorrect.");
+        }
+      } else {
+        // If user exists but has NO password (legacy user), set the password now
+        await supabase
+          .from('project_members')
+          .update({ password: password })
+          .eq('id', generatedId);
+      }
+
       // Update DB class_type to match current login if different (Keep profile fresh)
       if (existingUser.class_type !== userCandidate.classType) {
          await supabase.from('project_members').update({ class_type: userCandidate.classType }).eq('id', generatedId);
@@ -98,14 +119,15 @@ export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
       return user;
     } else {
-      // 2. Create new user
+      // 2. Create new user with password
       const newUser = {
         id: generatedId,
         first_name: userCandidate.firstName,
         last_name: userCandidate.lastName,
         class_type: userCandidate.classType,
         group_id: null,
-        votes: 0
+        votes: 0,
+        password: password
       };
 
       const { error: insertError } = await supabase
@@ -126,8 +148,12 @@ export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
       return user;
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Login failed:", error);
+    // Pass through specific error messages
+    if (error.message === "Mot de passe incorrect." || error.message === "Le mot de passe est requis.") {
+      throw error;
+    }
     throw new Error("Erreur de connexion avec la base de données.");
   }
 };
