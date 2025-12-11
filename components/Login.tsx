@@ -48,7 +48,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
              <UserCircle className="h-10 w-10 text-indigo-600" />
           </div>
           <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            Connexion au Projet
+            Connexion à la plateforme MIRA Challenge
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             Entrez vos coordonnées et définissez un mot de passe pour sécuriser votre choix.
