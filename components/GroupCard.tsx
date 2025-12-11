@@ -3,13 +3,14 @@ import React, { useState } from 'react';
 import { Group, User, ClassType, QUOTAS } from '../types';
 import { Button } from './Button';
 import { canJoinGroup } from '../services/storage';
-import { Users, Crown, Edit2, Check, X } from 'lucide-react';
+import { Users, Crown, Edit2, Check, X, LogOut } from 'lucide-react';
 
 interface GroupCardProps {
   group: Group;
   allGroups: Group[];
   currentUser: User;
   onJoin: (groupId: number) => void;
+  onLeave: (groupId: number) => void;
   onAssignLeader: (groupId: number, memberId: string) => void;
   onRename: (groupId: number, newName: string) => void;
   groupLockDate: Date;
@@ -21,6 +22,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   allGroups, 
   currentUser, 
   onJoin,
+  onLeave,
   onAssignLeader,
   onRename,
   groupLockDate,
@@ -56,6 +58,11 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   const handleCancelName = () => {
     setTempName(group.name);
     setIsEditingName(false);
+  };
+
+  const handleLeaveClick = () => {
+    // Direct call without confirmation dialog
+    onLeave(group.id);
   };
 
   return (
@@ -195,18 +202,32 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             )}
           </div>
         ) : (
-            <div className="flex flex-col items-center justify-center space-y-1 py-1">
-              <span className="text-sm font-medium text-indigo-700">
-                C'est votre équipe
-              </span>
-              {isLeaderSelectionOpen ? (
-                <span className="text-[10px] text-gray-500">
-                  Cliquez sur une couronne pour désigner le chef.
+            <div className="flex flex-col items-center justify-center space-y-3 py-1">
+              <div className="text-center">
+                <span className="text-sm font-medium text-indigo-700 block">
+                  C'est votre équipe
                 </span>
-              ) : (
-                <span className="text-[10px] text-red-500 font-medium">
-                  Sélection du chef clôturée.
-                </span>
+                {isLeaderSelectionOpen ? (
+                  <span className="text-[10px] text-gray-500">
+                    Cliquez sur une couronne pour désigner le chef.
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-red-500 font-medium">
+                    Sélection du chef clôturée.
+                  </span>
+                )}
+              </div>
+
+              {!isGroupLocked && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleLeaveClick}
+                  className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 w-full text-xs py-1"
+                >
+                  <LogOut className="h-3 w-3 mr-2" />
+                  Quitter l'équipe
+                </Button>
               )}
             </div>
         )}

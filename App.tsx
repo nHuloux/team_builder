@@ -8,6 +8,7 @@ import {
   logoutUser, 
   fetchGroups, 
   joinGroup, 
+  leaveGroup,
   assignLeader,
   updateGroupName,
   fetchAppConfig,
@@ -249,9 +250,43 @@ function App() {
     setIsActionLoading(true);
     const success = await joinGroup(currentUser.id, groupId);
     if (success) {
-      await loadData(); // Reloads groups and config
-      // Update local user state specifically for UI consistency
+      await loadData(); 
       setUser({ ...currentUser, groupId }); 
+    }
+    setIsActionLoading(false);
+  };
+
+  const handleLeaveGroup = async (groupId: number) => {
+    if (!currentUser) return;
+
+    if (new Date() > appConfig.consolidationDeadline) {
+      alert("La phase de consolidation est terminée. Vous ne pouvez plus quitter l'équipe.");
+      return;
+    }
+
+    setIsActionLoading(true);
+
+    // Optimistic Update: Remove user from ALL groups to be safe regarding ID matches or multiple memberships
+    // This forces the UI to show the user as "not in group" immediately
+    setGroups(prevGroups => prevGroups.map(g => ({
+        ...g,
+        members: g.members.filter(m => m.id !== currentUser.id)
+    })));
+    
+    // Update local user state
+    setUser(prev => prev ? ({ ...prev, groupId: null }) : null);
+
+    // Perform DB Update
+    const success = await leaveGroup(currentUser.id);
+    
+    if (success) {
+      // Re-fetch to confirm state
+      await loadData();
+    } else {
+        alert("Erreur lors de la sortie du groupe. Aucune modification n'a été effectuée.");
+        await loadData(); // Revert
+        const savedUser = getCurrentUser();
+        if (savedUser) setUser(savedUser);
     }
     setIsActionLoading(false);
   };
@@ -369,6 +404,7 @@ function App() {
                 allGroups={groups}
                 currentUser={currentUser}
                 onJoin={handleJoinGroup}
+                onLeave={handleLeaveGroup}
                 onAssignLeader={handleAssignLeader}
                 onRename={handleRenameGroup}
                 groupLockDate={appConfig.consolidationDeadline}
@@ -382,7 +418,7 @@ function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-auto">
         <div className="max-w-7xl mx-auto px-4 py-6 text-center text-sm text-gray-500">
-          &copy; {new Date().getFullYear()} MIRA Équipe. 
+          &copy; {new Date().getFullYear()} Nicolas Huloux for MIRA 
         </div>
       </footer>
     </div>

@@ -28,7 +28,8 @@ const transformUsersToGroups = (users: DBUser[]): Group[] => {
 
   // Distribute users into groups
   users.forEach(u => {
-    if (u.group_id && u.group_id > 0 && u.group_id <= TOTAL_GROUPS) {
+    // Check strict equality to ensure 0 is excluded but valid numbers are included
+    if (u.group_id !== null && u.group_id !== undefined && u.group_id > 0 && u.group_id <= TOTAL_GROUPS) {
       const groupIndex = u.group_id - 1;
       const member: Member = {
         id: u.id,
@@ -120,14 +121,11 @@ export const updateGroupName = async (groupId: number, name: string): Promise<bo
 // FETCH APP CONFIG
 export const fetchAppConfig = async (): Promise<AppConfig> => {
   try {
-    // Try to fetch from a 'challenge_config' table
-    // Expected structure: key (text), value (text)
     const { data, error } = await supabase
       .from('challenge_config')
       .select('key, value');
 
     if (error || !data) {
-      console.warn("Could not fetch config (table might not exist), using defaults.");
       return {
         coreTeamDeadline: DEFAULT_CORE_TEAM_DEADLINE,
         consolidationDeadline: DEFAULT_CONSOLIDATION_DEADLINE,
@@ -140,9 +138,7 @@ export const fetchAppConfig = async (): Promise<AppConfig> => {
     data.forEach(row => {
       if (row.key === 'CORE_TEAM_DEADLINE') config.coreTeamDeadline = new Date(row.value);
       if (row.key === 'CONSOLIDATION_DEADLINE') config.consolidationDeadline = new Date(row.value);
-      // Fallback for old key name if migration hasn't run
-      if (row.key === 'LEADER_DEADLINE') config.consolidationDeadline = new Date(row.value);
-      
+      if (row.key === 'LEADER_DEADLINE') config.consolidationDeadline = new Date(row.value); // Fallback
       if (row.key === 'LEADER_LOCK_DATE') config.leaderLockDate = new Date(row.value);
       if (row.key === 'CHALLENGE_START') config.challengeStart = new Date(row.value);
     });
@@ -191,7 +187,8 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
 
 // LOGIN / CREATE USER WITH PASSWORD
 export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string): Promise<User> => {
-  const generatedId = `${userCandidate.firstName.toLowerCase()}-${userCandidate.lastName.toLowerCase()}`.trim();
+  // Normalize ID generation: lowercase and trim
+  const generatedId = `${userCandidate.firstName.trim().toLowerCase()}-${userCandidate.lastName.trim().toLowerCase()}`;
   const password = passwordRaw.trim();
 
   if (!password) {
@@ -212,8 +209,6 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
 
     if (existingUser) {
       // 1a. User exists
-      
-      // Check Password Logic
       if (existingUser.password) {
         if (existingUser.password !== password) {
            throw new Error("Mot de passe incorrect.");
@@ -247,7 +242,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         first_name: userCandidate.firstName,
         last_name: userCandidate.lastName,
         class_type: userCandidate.classType,
-        group_id: null,
+        group_id: 0, // Default to 0 (no group)
         password: password,
         is_leader: false
       };
@@ -263,7 +258,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         firstName: newUser.first_name,
         lastName: newUser.last_name,
         classType: newUser.class_type as ClassType,
-        groupId: null
+        groupId: 0
       };
 
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
@@ -283,7 +278,7 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
   try {
     const { error } = await supabase
       .from('project_members')
-      .update({ group_id: groupId, is_leader: false }) // Reset leader status when joining a new group
+      .update({ group_id: groupId, is_leader: false })
       .eq('id', userId);
 
     if (error) {
@@ -304,41 +299,58 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
   }
 };
 
-// ASSIGN LEADER (TOGGLE CROWN)
+// LEAVE GROUP
+export const leaveGroup = async (userId: string): Promise<boolean> => {
+  try {
+    // Set group_id to 0 to remove from any active group (1-9)
+    // We do NOT use select() to avoid RLS return data issues, assuming permission to update own row exists
+    const { error } = await supabase
+      .from('project_members')
+      .update({ group_id: 0, is_leader: false })
+      .eq('id', userId);
+
+    if (error) {
+      console.error("Supabase leave error:", error.message);
+      return false;
+    }
+
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      currentUser.groupId = 0; // Set to 0 to indicate no group
+      localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(currentUser));
+    }
+    return true;
+
+  } catch (error) {
+    console.error("Leave group failed:", error);
+    return false;
+  }
+};
+
+// ASSIGN LEADER
 export const assignLeader = async (groupId: number, newLeaderId: string): Promise<boolean> => {
    try {
-    // 1. Reset leader for everyone in this group
     const { error: resetError } = await supabase
       .from('project_members')
       .update({ is_leader: false })
       .eq('group_id', groupId);
 
-    if (resetError) {
-        console.error("Error resetting leaders:", resetError.message, resetError.details);
-        throw new Error(resetError.message);
-    }
+    if (resetError) throw new Error(resetError.message);
 
-    // 2. Set new leader
     const { error: updateError } = await supabase
       .from('project_members')
       .update({ is_leader: true })
       .eq('id', newLeaderId);
 
-    if (updateError) {
-        console.error("Error setting new leader:", updateError.message, updateError.details);
-        throw new Error(updateError.message);
-    }
+    if (updateError) throw new Error(updateError.message);
 
     return true;
    } catch (error: any) {
-     // Log the full error object structure for debugging
-     console.error("Assign leader failed (full object):", JSON.stringify(error, null, 2));
-     console.error("Assign leader failed (message):", error.message || error);
+     console.error("Assign leader failed:", error.message || error);
      return false;
    }
 };
 
-// LOGOUT
 export const logoutUser = () => {
   localStorage.removeItem(STORAGE_KEY_CURRENT_USER);
 };
@@ -356,12 +368,10 @@ export const canJoinGroup = (groups: Group[], groupId: number, userClass: ClassT
   const currentCount = group.members.filter(m => m.classType === userClass).length;
   const required = QUOTAS[userClass];
 
-  // Rule 1: Filling mandatory slots
   if (currentCount < required) {
     return { allowed: true };
   }
 
-  // Rule 2: Overfilling only allowed if ALL groups meet minimum
   const allGroupsMeetRequirement = groups.every(g => {
     const count = g.members.filter(m => m.classType === userClass).length;
     return count >= required;
