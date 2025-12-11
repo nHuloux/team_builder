@@ -52,7 +52,7 @@ export const fetchGroups = async (): Promise<Group[]> => {
       .select('*');
 
     if (error) {
-      console.error("Supabase fetch error details:", JSON.stringify(error, null, 2));
+      console.error("Supabase fetch error:", error.message);
       return [];
     }
     
@@ -76,7 +76,6 @@ export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
       .single();
 
     if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is 'not found'
-      console.error("Login fetch error:", JSON.stringify(fetchError, null, 2));
       throw fetchError;
     }
 
@@ -113,10 +112,7 @@ export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
         .from('project_members')
         .insert([newUser]);
 
-      if (insertError) {
-        console.error("Login insert error:", JSON.stringify(insertError, null, 2));
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       const user: User = {
         id: newUser.id,
@@ -132,7 +128,7 @@ export const loginAndCheckUser = async (userCandidate: User): Promise<User> => {
     }
   } catch (error) {
     console.error("Login failed:", error);
-    throw new Error("Erreur de connexion avec la base de données. Vérifiez la console pour les détails.");
+    throw new Error("Erreur de connexion avec la base de données.");
   }
 };
 
@@ -145,7 +141,7 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
       .eq('id', userId);
 
     if (error) {
-      console.error("Supabase join error:", JSON.stringify(error, null, 2));
+      console.error("Supabase join error:", error.message);
       return false;
     }
 
@@ -173,10 +169,7 @@ export const voteForLeader = async (groupId: number, candidateId: string): Promi
       .eq('id', candidateId)
       .single();
       
-    if (fetchError || !user) {
-        console.error("Vote fetch error:", JSON.stringify(fetchError, null, 2));
-        return false;
-    }
+    if (fetchError || !user) return false;
 
     // 2. Increment
     const { error: updateError } = await supabase
@@ -184,10 +177,7 @@ export const voteForLeader = async (groupId: number, candidateId: string): Promi
       .update({ votes: (user.votes || 0) + 1 })
       .eq('id', candidateId);
 
-    if (updateError) {
-        console.error("Vote update error:", JSON.stringify(updateError, null, 2));
-        return false;
-    }
+    if (updateError) return false;
 
     return true;
    } catch (error) {

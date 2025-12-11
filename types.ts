@@ -31,4 +31,8 @@ export const QUOTAS = {
 };
 
 export const TOTAL_GROUPS = 9;
-export const DEADLINE_DATE = new Date('2026-02-01T00:00:00'); // Feb 1st
+
+// Updated Timeline Dates (Assuming 2025 for the upcoming challenge)
+export const CORE_TEAM_DEADLINE = new Date('2026-02-01T00:00:00'); 
+export const DEADLINE_DATE = new Date('2026-03-01T00:00:00'); // Start of Vote Phase
+export const CHALLENGE_START = new Date('2026-03-23T00:00:00');

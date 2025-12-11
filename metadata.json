@@ -1,5 +1,5 @@
 {
-  "name": "TeamBuilder",
-  "description": "Une interface de composition d'équipe pour les groupes de projet avec des règles de distribution intelligentes et un vote pour le chef.",
+  "name": "MIRA Équipe",
+  "description": "Une interface de composition d'équipe pour le challenge MIRA avec des règles de distribution intelligentes et un processus en 4 phases.",
   "requestFramePermissions": []
 }
