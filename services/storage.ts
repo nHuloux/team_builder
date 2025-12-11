@@ -365,23 +365,41 @@ export const canJoinGroup = (groups: Group[], groupId: number, userClass: ClassT
   const group = groups.find(g => g.id === groupId);
   if (!group) return { allowed: false, reason: 'Groupe non trouvé' };
 
-  const currentCount = group.members.filter(m => m.classType === userClass).length;
-  const required = QUOTAS[userClass];
+  const currentClassCount = group.members.filter(m => m.classType === userClass).length;
+  const requiredClassCount = QUOTAS[userClass];
 
-  if (currentCount < required) {
+  // Rule 1: Filling mandatory slots
+  if (currentClassCount < requiredClassCount) {
     return { allowed: true };
   }
 
-  const allGroupsMeetRequirement = groups.every(g => {
+  // Rule 2: Overfilling only allowed if ALL groups meet minimum class requirement
+  const allGroupsMeetClassRequirement = groups.every(g => {
     const count = g.members.filter(m => m.classType === userClass).length;
-    return count >= required;
+    return count >= requiredClassCount;
   });
 
-  if (!allGroupsMeetRequirement) {
+  if (!allGroupsMeetClassRequirement) {
     return { 
       allowed: false, 
-      reason: `Impossible de rejoindre. Tous les groupes doivent avoir ${required} ${userClass}(s) avant de dépasser le quota.` 
+      reason: `Impossible de rejoindre. Tous les groupes doivent avoir ${requiredClassCount} ${userClass}(s) avant de dépasser le quota.` 
     };
+  }
+
+  // Rule 3: Max Capacity (9) Constraint
+  // "Il faut que ce groupe ait moins de 9 personnes, sauf si tous les groupes ont déjà au moins 9 personnes."
+  const MAX_PREFERRED_SIZE = 9;
+  const currentTotal = group.members.length;
+
+  if (currentTotal >= MAX_PREFERRED_SIZE) {
+    const allGroupsReachedMax = groups.every(g => g.members.length >= MAX_PREFERRED_SIZE);
+    
+    if (!allGroupsReachedMax) {
+      return {
+        allowed: false,
+        reason: `Ce groupe a atteint ${MAX_PREFERRED_SIZE} personnes. Veuillez compléter les autres groupes d'abord.`
+      };
+    }
   }
 
   return { allowed: true };
