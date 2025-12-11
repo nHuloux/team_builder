@@ -9,6 +9,7 @@ import {
   fetchGroups, 
   joinGroup, 
   assignLeader,
+  updateGroupName,
   fetchAppConfig,
   updateAppConfig
 } from './services/storage';
@@ -38,9 +39,9 @@ const TimelineVisual: React.FC<{ config: AppConfig }> = ({ config }) => {
     },
     { 
       id: 3, 
-      title: "Phase 3 : Chef d'équipe", 
+      title: "Phase 3 : Finalisation", 
       date: `Avant ${config.leaderLockDate.toLocaleDateString('fr-FR')}`, 
-      desc: "Désignation obligatoire du chef",
+      desc: "Choix du chef et nom de l'équipe",
       active: now >= config.consolidationDeadline && now < config.leaderLockDate,
       completed: now >= config.leaderLockDate
     },
@@ -172,7 +173,7 @@ const AdminModal: React.FC<{
               value={formData.leaderLockDate}
               onChange={e => setFormData({...formData, leaderLockDate: e.target.value})}
             />
-            <p className="text-xs text-gray-500 mt-1">Date limite pour choisir le chef.</p>
+            <p className="text-xs text-gray-500 mt-1">Date limite pour choisir le chef et le nom d'équipe.</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Début du Challenge</label>
@@ -271,6 +272,16 @@ function App() {
     setIsActionLoading(false);
   };
 
+  const handleRenameGroup = async (groupId: number, newName: string) => {
+    setIsActionLoading(true);
+    const success = await updateGroupName(groupId, newName);
+    if (!success) {
+      alert("Erreur lors du renommage de l'équipe.");
+    }
+    await loadData();
+    setIsActionLoading(false);
+  };
+
   const handleUpdateConfig = async (newConfig: AppConfig) => {
     const success = await updateAppConfig(newConfig);
     if (success) {
@@ -359,6 +370,7 @@ function App() {
                 currentUser={currentUser}
                 onJoin={handleJoinGroup}
                 onAssignLeader={handleAssignLeader}
+                onRename={handleRenameGroup}
                 groupLockDate={appConfig.consolidationDeadline}
                 leaderLockDate={appConfig.leaderLockDate}
               />

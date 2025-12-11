@@ -48,19 +48,72 @@ const transformUsersToGroups = (users: DBUser[]): Group[] => {
 // FETCH GROUPS
 export const fetchGroups = async (): Promise<Group[]> => {
   try {
-    const { data, error } = await supabase
+    // 1. Fetch Members
+    const { data: membersData, error: membersError } = await supabase
       .from('project_members')
       .select('*');
 
-    if (error) {
-      console.error("Supabase fetch error:", error.message);
+    if (membersError) {
+      console.error("Supabase fetch members error:", membersError.message);
       return [];
     }
+
+    // 2. Fetch Group Names from Config
+    const { data: namesData, error: namesError } = await supabase
+      .from('challenge_config')
+      .select('key, value')
+      .like('key', 'GROUP_NAME_%');
+
+    const groups = transformUsersToGroups(membersData as DBUser[]);
+
+    // 3. Apply Custom Names
+    if (!namesError && namesData) {
+      const namesMap = new Map<number, string>();
+      namesData.forEach(row => {
+        try {
+          const id = parseInt(row.key.replace('GROUP_NAME_', ''));
+          if (!isNaN(id)) {
+            namesMap.set(id, row.value);
+          }
+        } catch (e) {
+          // ignore parsing error
+        }
+      });
+
+      groups.forEach(g => {
+        if (namesMap.has(g.id)) {
+          g.name = namesMap.get(g.id)!;
+        }
+      });
+    }
     
-    return transformUsersToGroups(data as DBUser[]);
+    return groups;
   } catch (error) {
     console.error("Failed to fetch groups:", error);
     return [];
+  }
+};
+
+// UPDATE GROUP NAME
+export const updateGroupName = async (groupId: number, name: string): Promise<boolean> => {
+  if (!name || name.trim().length === 0) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('challenge_config')
+      .upsert(
+        { key: `GROUP_NAME_${groupId}`, value: name.trim() },
+        { onConflict: 'key' }
+      );
+
+    if (error) {
+      console.error("Failed to update group name:", error.message);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("Error updating group name:", error);
+    return false;
   }
 };
 

@@ -1,9 +1,9 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Group, User, ClassType, QUOTAS } from '../types';
 import { Button } from './Button';
 import { canJoinGroup } from '../services/storage';
-import { Users, Crown } from 'lucide-react';
+import { Users, Crown, Edit2, Check, X } from 'lucide-react';
 
 interface GroupCardProps {
   group: Group;
@@ -11,6 +11,7 @@ interface GroupCardProps {
   currentUser: User;
   onJoin: (groupId: number) => void;
   onAssignLeader: (groupId: number, memberId: string) => void;
+  onRename: (groupId: number, newName: string) => void;
   groupLockDate: Date;
   leaderLockDate: Date;
 }
@@ -21,6 +22,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   currentUser, 
   onJoin,
   onAssignLeader,
+  onRename,
   groupLockDate,
   leaderLockDate
 }) => {
@@ -33,6 +35,10 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   // Group modification is locked after the group lock date (Phase 2 end)
   const isGroupLocked = now > groupLockDate;
   
+  // Renaming State
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(group.name);
+
   // Calculate counts
   const counts = {
     [ClassType.INGENIEUR]: group.members.filter(m => m.classType === ClassType.INGENIEUR).length,
@@ -40,17 +46,64 @@ export const GroupCard: React.FC<GroupCardProps> = ({
     [ClassType.CLIC]: group.members.filter(m => m.classType === ClassType.CLIC).length,
   };
 
-  const isFull = (type: ClassType) => counts[type] >= QUOTAS[type];
+  const handleSaveName = () => {
+    if (tempName.trim()) {
+      onRename(group.id, tempName.trim());
+      setIsEditingName(false);
+    }
+  };
+
+  const handleCancelName = () => {
+    setTempName(group.name);
+    setIsEditingName(false);
+  };
 
   return (
     <div className={`flex flex-col h-full bg-white rounded-xl shadow-sm border ${userInGroup ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-200'}`}>
       <div className="p-5 flex-1">
         <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            {group.name}
-            {userInGroup && <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">Vous</span>}
-          </h3>
-          <Users className="h-5 w-5 text-gray-400" />
+          {isEditingName ? (
+            <div className="flex items-center gap-1 w-full mr-2">
+              <input 
+                type="text" 
+                value={tempName}
+                maxLength={30}
+                onChange={(e) => setTempName(e.target.value)}
+                className="flex-1 text-sm border-gray-300 border rounded px-2 py-1 focus:ring-indigo-500 focus:border-indigo-500"
+                autoFocus
+                placeholder="Nom de l'équipe"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveName();
+                  if (e.key === 'Escape') handleCancelName();
+                }}
+              />
+              <button onClick={handleSaveName} className="p-1 text-green-600 hover:bg-green-50 rounded">
+                <Check className="h-4 w-4" />
+              </button>
+              <button onClick={handleCancelName} className="p-1 text-red-500 hover:bg-red-50 rounded">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 max-w-[85%]">
+              <h3 className="text-lg font-bold text-gray-900 truncate" title={group.name}>
+                {group.name}
+              </h3>
+              {userInGroup && <span className="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">Vous</span>}
+              {/* Allow renaming if user is in group and Phase 2 is done (Groups are locked) */}
+              {userInGroup && isGroupLocked && (
+                <button 
+                  onClick={() => setIsEditingName(true)} 
+                  className="text-gray-400 hover:text-indigo-600 p-1 rounded-full hover:bg-gray-100 transition-colors"
+                  title="Renommer l'équipe"
+                >
+                  <Edit2 className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+          
+          <Users className="h-5 w-5 text-gray-400 shrink-0" />
         </div>
 
         {/* Quota Bars */}
