@@ -1,0 +1,5 @@
+{
+  "name": "TeamBuilder",
+  "description": "Une interface de composition d'équipe pour les groupes de projet avec des règles de distribution intelligentes et un vote pour le chef.",
+  "requestFramePermissions": []
+}

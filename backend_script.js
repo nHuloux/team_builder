@@ -1,0 +1,1 @@
+// This file is no longer used as we migrated to Supabase.
