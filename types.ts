@@ -11,10 +11,11 @@ export interface User {
   lastName: string;
   classType: ClassType;
   groupId?: number | null;
+  isLeader?: boolean;
 }
 
 export interface Member extends User {
-  isLeader: boolean;
+  isLeader: boolean; // Override to be required for Member
 }
 
 export interface Group {

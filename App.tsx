@@ -14,7 +14,7 @@ import {
   fetchAppConfig,
   updateAppConfig
 } from './services/storage';
-import { LogOut, RefreshCw, CheckCircle2, Settings, X } from 'lucide-react';
+import { LogOut, RefreshCw, CheckCircle2, Settings, X, Crown } from 'lucide-react';
 import { Button } from './components/Button';
 
 // --- Visual Process Component ---
@@ -225,6 +225,33 @@ function App() {
     ]);
     setGroups(groupsData);
     setAppConfig(configData);
+
+    // Sync current user leader status from the latest group data
+    setUser(prevUser => {
+        if (!prevUser) return null;
+        
+        // Find user in new groupsData to see if they are a leader
+        let isLeader = false;
+        
+        // Optimization: if we know the group ID, look there first, otherwise scan all
+        // But scanning all is safer to handle any data mismatch
+        for (const g of groupsData) {
+            const member = g.members.find(m => m.id === prevUser.id);
+            if (member) {
+                isLeader = member.isLeader;
+                break;
+            }
+        }
+        
+        // If status changed or needs refresh, update state and local storage
+        if (prevUser.isLeader !== isLeader) {
+             const updated = { ...prevUser, isLeader };
+             localStorage.setItem('teambuilder_current_user', JSON.stringify(updated));
+             return updated;
+        }
+        return prevUser;
+    });
+
     setIsLoading(false);
   };
 
@@ -251,7 +278,7 @@ function App() {
     const success = await joinGroup(currentUser.id, groupId);
     if (success) {
       await loadData(); 
-      setUser({ ...currentUser, groupId }); 
+      setUser(prev => prev ? { ...prev, groupId } : null); 
     }
     setIsActionLoading(false);
   };
@@ -274,7 +301,7 @@ function App() {
     })));
     
     // Update local user state
-    setUser(prev => prev ? ({ ...prev, groupId: null }) : null);
+    setUser(prev => prev ? ({ ...prev, groupId: null, isLeader: false }) : null);
 
     // Perform DB Update
     const success = await leaveGroup(currentUser.id);
@@ -355,7 +382,10 @@ function App() {
             )}
 
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium text-gray-900">{currentUser.firstName} {currentUser.lastName}</p>
+              <p className="text-sm font-medium text-gray-900 flex items-center justify-end gap-1">
+                {currentUser.firstName} {currentUser.lastName}
+                {currentUser.isLeader && <Crown className="h-3 w-3 text-yellow-500 fill-yellow-500" />}
+              </p>
               <p className="text-xs text-gray-500">{currentUser.classType}</p>
             </div>
             <Button variant="outline" size="sm" onClick={handleLogout}>

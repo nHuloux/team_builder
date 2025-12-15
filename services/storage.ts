@@ -230,7 +230,8 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         firstName: existingUser.first_name,
         lastName: existingUser.last_name,
         classType: existingUser.class_type as ClassType,
-        groupId: existingUser.group_id
+        groupId: existingUser.group_id,
+        isLeader: existingUser.is_leader || false
       };
       
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
@@ -258,7 +259,8 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         firstName: newUser.first_name,
         lastName: newUser.last_name,
         classType: newUser.class_type as ClassType,
-        groupId: 0
+        groupId: 0,
+        isLeader: false
       };
 
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
@@ -289,6 +291,7 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
     const currentUser = getCurrentUser();
     if (currentUser) {
       currentUser.groupId = groupId;
+      currentUser.isLeader = false; // Reset leader when joining new group
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(currentUser));
     }
     return true;
@@ -317,6 +320,7 @@ export const leaveGroup = async (userId: string): Promise<boolean> => {
     const currentUser = getCurrentUser();
     if (currentUser) {
       currentUser.groupId = 0; // Set to 0 to indicate no group
+      currentUser.isLeader = false; // Reset leader when leaving
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(currentUser));
     }
     return true;

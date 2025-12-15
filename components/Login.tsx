@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { User, ClassType } from '../types';
 import { Button } from './Button';
@@ -97,7 +98,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 onChange={(e) => setClassType(e.target.value as ClassType)}
               >
                 {Object.values(ClassType).map((type) => (
-                  <option key={type} value={type}>{type}</option>
+                  <option key={type} value={type}>
+                    {type === ClassType.MIND ? 'MIND (Communication)' : 
+                     type === ClassType.CLIC ? 'CLIC (Développement)' : 
+                     type}
+                  </option>
                 ))}
               </select>
             </div>
