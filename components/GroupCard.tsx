@@ -118,7 +118,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
           {Object.values(ClassType).map((type) => (
             <div key={type}>
               <div className="flex justify-between text-xs mb-1">
-                <span className="font-medium text-gray-600">{type}</span>
+                <span className="font-medium text-gray-600">{type === ClassType.INGENIEUR ? 'Ingénieur' : type}</span>
                 <span className={`${counts[type] < QUOTAS[type] ? 'text-red-500' : 'text-green-600'}`}>
                   {counts[type]} / {QUOTAS[type]} requis
                 </span>
@@ -144,7 +144,9 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                 <li key={member.id} className="flex justify-between items-center text-gray-700 bg-gray-50 px-2 py-1 rounded">
                   <span className="truncate">{member.firstName} {member.lastName}</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400 bg-white border border-gray-200 px-1 rounded">{member.classType.slice(0,3)}</span>
+                    <span className="text-xs text-gray-500 font-medium bg-white border border-gray-200 px-1.5 rounded">
+                      {member.classType === ClassType.INGENIEUR ? 'INGE' : member.classType}
+                    </span>
                     
                     {/* Leader Management */}
                     {member.isLeader ? (
