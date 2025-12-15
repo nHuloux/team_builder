@@ -15,6 +15,25 @@ interface DBUser {
   is_leader?: boolean;
 }
 
+// --- Helper Functions ---
+
+// Simple SHA-256 hash function using Web Crypto API
+const hashPassword = async (password: string): Promise<string> => {
+  // Safety check for Secure Context (HTTPS or localhost)
+  if (!window.crypto || !window.crypto.subtle) {
+    console.warn("Crypto API non disponible. L'application nécessite HTTPS pour chiffrer les mots de passe.");
+    // In dev/http environments where crypto.subtle is missing, we can't hash securely.
+    // Throwing allows the UI to show a specific error.
+    throw new Error("Environnement non sécurisé (HTTPS requis) : impossible de chiffrer le mot de passe.");
+  }
+
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
 // --- Core Service Logic ---
 
 // Transform DB users into Group objects
@@ -189,10 +208,20 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
 export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string): Promise<User> => {
   // Normalize ID generation: lowercase and trim
   const generatedId = `${userCandidate.firstName.trim().toLowerCase()}-${userCandidate.lastName.trim().toLowerCase()}`;
-  const password = passwordRaw.trim();
-
-  if (!password) {
+  
+  if (!passwordRaw) {
     throw new Error("Le mot de passe est requis.");
+  }
+
+  // We trim the password for the "standard" flow (hashing), but we keep the raw version for legacy checks
+  const passwordTrimmed = passwordRaw.trim();
+
+  // Calculate Hash (always based on trimmed password for consistency going forward)
+  let hashedPassword = '';
+  try {
+     hashedPassword = await hashPassword(passwordTrimmed);
+  } catch (e: any) {
+     throw new Error(e.message || "Erreur lors du chiffrement du mot de passe.");
   }
   
   try {
@@ -210,13 +239,36 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
     if (existingUser) {
       // 1a. User exists
       if (existingUser.password) {
-        if (existingUser.password !== password) {
-           throw new Error("Mot de passe incorrect.");
+        // CHECK PASSWORD
+        // Strategy:
+        // 1. Secure Check: Does the DB hash match the hash of the trimmed input?
+        // 2. Legacy Check A: Does the DB plain text match the RAW input? (e.g. "password ")
+        // 3. Legacy Check B: Does the DB plain text match the TRIMMED input? (e.g. "password")
+        
+        const dbPassword = existingUser.password;
+        
+        const isHashMatch = dbPassword === hashedPassword;
+        const isPlainMatchRaw = dbPassword === passwordRaw;
+        const isPlainMatchTrimmed = dbPassword === passwordTrimmed;
+
+        if (isHashMatch) {
+            // Success: Already migrated and correct.
+        } else if (isPlainMatchRaw || isPlainMatchTrimmed) {
+            // Success: Matches plain text (either raw or trimmed).
+            // MIGRATION: Update DB with the hashed version (trimmed) for next time.
+            await supabase
+              .from('project_members')
+              .update({ password: hashedPassword })
+              .eq('id', generatedId);
+        } else {
+            // Neither hash nor plain text matched
+            throw new Error("Mot de passe incorrect.");
         }
       } else {
+        // If user exists but has no password, set it.
         await supabase
           .from('project_members')
-          .update({ password: password })
+          .update({ password: hashedPassword })
           .eq('id', generatedId);
       }
 
@@ -237,14 +289,14 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
       return user;
     } else {
-      // 2. Create new user with password
+      // 2. Create new user with password (HASHED)
       const newUser = {
         id: generatedId,
         first_name: userCandidate.firstName,
         last_name: userCandidate.lastName,
         class_type: userCandidate.classType,
         group_id: 0, // Default to 0 (no group)
-        password: password,
+        password: hashedPassword, // Store Hash
         is_leader: false
       };
 
@@ -271,7 +323,8 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
     if (error.message === "Mot de passe incorrect." || error.message === "Le mot de passe est requis.") {
       throw error;
     }
-    throw new Error("Erreur de connexion avec la base de données.");
+    // Don't expose internal errors to UI too bluntly, but useful for debugging this issue
+    throw new Error(error.message || "Erreur de connexion avec la base de données.");
   }
 };
 
