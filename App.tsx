@@ -479,6 +479,7 @@ function App() {
         isOpen={isGameOpen} 
         onClose={() => setIsGameOpen(false)} 
         groupName={currentGroupName}
+        members={userGroup?.members || []}
       />
 
       {/* Header */}
