@@ -1,7 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Login } from './components/Login';
 import { GroupCard } from './components/GroupCard';
+import { MiniGame } from './components/MiniGame';
 import { User, Group, AppConfig, DEFAULT_CORE_TEAM_DEADLINE, DEFAULT_CONSOLIDATION_DEADLINE, DEFAULT_LEADER_LOCK_DATE, DEFAULT_CHALLENGE_START } from './types';
 import { 
   getCurrentUser, 
@@ -14,12 +15,57 @@ import {
   fetchAppConfig,
   updateAppConfig
 } from './services/storage';
-import { LogOut, RefreshCw, CheckCircle2, Settings, X, Crown } from 'lucide-react';
+import { LogOut, RefreshCw, CheckCircle2, Settings, X, Crown, Clock, PartyPopper } from 'lucide-react';
 import { Button } from './components/Button';
+
+// --- Confetti Component (Easter Egg) ---
+const Confetti: React.FC = () => {
+  const colors = ['#EF476F', '#FFD166', '#06D6A0', '#118AB2', '#073B4C', '#8338EC', '#FF006E'];
+  
+  return (
+    <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+      {Array.from({ length: 50 }).map((_, i) => {
+        const left = Math.random() * 100;
+        const animDuration = 1 + Math.random() * 2;
+        const delay = Math.random() * 0.5;
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const size = 5 + Math.random() * 10;
+        
+        return (
+          <div
+            key={i}
+            className="absolute top-[-20px] rounded-full animate-fall"
+            style={{
+              left: `${left}%`,
+              width: `${size}px`,
+              height: `${size}px`,
+              backgroundColor: color,
+              animation: `fall ${animDuration}s linear ${delay}s forwards`,
+              transform: `rotate(${Math.random() * 360}deg)`
+            }}
+          />
+        );
+      })}
+      <style>{`
+        @keyframes fall {
+          to {
+            transform: translateY(100vh) rotate(720deg);
+          }
+        }
+      `}</style>
+    </div>
+  );
+};
 
 // --- Visual Process Component ---
 const TimelineVisual: React.FC<{ config: AppConfig }> = ({ config }) => {
-  const now = new Date();
+  const [now, setNow] = useState(new Date());
+
+  // Update timer every minute
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   
   const steps = [
     { 
@@ -56,9 +102,54 @@ const TimelineVisual: React.FC<{ config: AppConfig }> = ({ config }) => {
     }
   ];
 
+  // Calculate countdown for active phase
+  const activeStep = steps.find(s => s.active);
+  let countdownDisplay = null;
+  let isUrgent = false;
+
+  if (activeStep && activeStep.id < 4) {
+      let deadline: Date | null = null;
+      if (activeStep.id === 1) deadline = config.coreTeamDeadline;
+      if (activeStep.id === 2) deadline = config.consolidationDeadline;
+      if (activeStep.id === 3) deadline = config.leaderLockDate;
+
+      if (deadline) {
+          const diff = deadline.getTime() - now.getTime();
+          if (diff > 0) {
+              const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+              const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+              const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+              
+              if (days <= 5) {
+                isUrgent = true;
+              }
+
+              if (days > 0) {
+                countdownDisplay = `${days}j ${hours}h`;
+              } else {
+                countdownDisplay = `${hours}h ${minutes}min`;
+              }
+          }
+      }
+  }
+
   return (
     <div className="w-full py-6 px-4 mb-6 bg-white rounded-lg border border-gray-200 shadow-sm">
-       <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6 text-center md:text-left">Calendrier du Challenge</h3>
+       <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+           <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider text-center sm:text-left">Calendrier du Challenge</h3>
+           
+           {countdownDisplay && (
+             <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium shadow-sm border ${
+               isUrgent 
+                 ? 'bg-red-50 text-red-700 border-red-100' 
+                 : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+             }`}>
+               <Clock className={`w-3.5 h-3.5 mr-1.5 ${isUrgent ? 'text-red-600' : ''}`} />
+               <span>Fin de phase dans <span className="font-bold">{countdownDisplay}</span></span>
+             </div>
+           )}
+       </div>
+
        <div className="relative flex flex-col md:flex-row justify-between items-start md:items-center w-full gap-6 md:gap-0">
           
           {/* Progress Bar Background (Desktop only) */}
@@ -209,6 +300,13 @@ function App() {
     challengeStart: DEFAULT_CHALLENGE_START
   });
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  
+  // Easter Egg States
+  const [titleClicks, setTitleClicks] = useState(0);
+  const [isPartyMode, setIsPartyMode] = useState(false);
+  const [isSurferMode, setIsSurferMode] = useState(false);
+  const [isGameOpen, setIsGameOpen] = useState(false); // Mini Game State
+  const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initial Load
   useEffect(() => {
@@ -230,11 +328,7 @@ function App() {
     setUser(prevUser => {
         if (!prevUser) return null;
         
-        // Find user in new groupsData to see if they are a leader
         let isLeader = false;
-        
-        // Optimization: if we know the group ID, look there first, otherwise scan all
-        // But scanning all is safer to handle any data mismatch
         for (const g of groupsData) {
             const member = g.members.find(m => m.id === prevUser.id);
             if (member) {
@@ -243,7 +337,6 @@ function App() {
             }
         }
         
-        // If status changed or needs refresh, update state and local storage
         if (prevUser.isLeader !== isLeader) {
              const updated = { ...prevUser, isLeader };
              localStorage.setItem('teambuilder_current_user', JSON.stringify(updated));
@@ -268,7 +361,6 @@ function App() {
   const handleJoinGroup = async (groupId: number) => {
     if (!currentUser) return;
 
-    // Phase 2 Constraint: No changes after consolidationDeadline
     if (new Date() > appConfig.consolidationDeadline) {
       alert("La phase de consolidation est terminée. Vous ne pouvez plus changer d'équipe.");
       return;
@@ -278,7 +370,9 @@ function App() {
     const success = await joinGroup(currentUser.id, groupId);
     if (success) {
       await loadData(); 
-      setUser(prev => prev ? { ...prev, groupId } : null); 
+      setUser(prev => prev ? { ...prev, groupId } : null);
+      // Trigger Game on successful join
+      setIsGameOpen(true);
     }
     setIsActionLoading(false);
   };
@@ -293,25 +387,20 @@ function App() {
 
     setIsActionLoading(true);
 
-    // Optimistic Update: Remove user from ALL groups to be safe regarding ID matches or multiple memberships
-    // This forces the UI to show the user as "not in group" immediately
     setGroups(prevGroups => prevGroups.map(g => ({
         ...g,
         members: g.members.filter(m => m.id !== currentUser.id)
     })));
     
-    // Update local user state
     setUser(prev => prev ? ({ ...prev, groupId: null, isLeader: false }) : null);
 
-    // Perform DB Update
     const success = await leaveGroup(currentUser.id);
     
     if (success) {
-      // Re-fetch to confirm state
       await loadData();
     } else {
         alert("Erreur lors de la sortie du groupe. Aucune modification n'a été effectuée.");
-        await loadData(); // Revert
+        await loadData();
         const savedUser = getCurrentUser();
         if (savedUser) setUser(savedUser);
     }
@@ -319,7 +408,6 @@ function App() {
   };
 
   const handleAssignLeader = async (groupId: number, memberId: string) => {
-    // Phase 3 Constraint: Leader selection allowed until leaderLockDate
     if (new Date() > appConfig.leaderLockDate) {
         alert("La date limite pour désigner un chef est dépassée.");
         return;
@@ -352,20 +440,57 @@ function App() {
       alert("Erreur lors de la mise à jour des dates.");
     }
   };
+  
+  // Easter Egg Logic
+  const handleTitleClick = () => {
+    if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
+    
+    setTitleClicks(prev => {
+        const newCount = prev + 1;
+        if (newCount === 5) {
+            setIsPartyMode(true);
+            setTimeout(() => {
+                setIsPartyMode(false);
+                setTitleClicks(0);
+            }, 5000); // Party lasts 5 seconds
+            return 0;
+        }
+        return newCount;
+    });
+
+    titleTimeoutRef.current = setTimeout(() => {
+        setTitleClicks(0);
+    }, 1000); // Reset count if no click for 1 second
+  };
 
   const isAdmin = currentUser?.firstName === 'Nicolas' && currentUser?.lastName === 'Huloux';
+
+  const userGroup = groups.find(g => g.id === currentUser?.groupId);
+  const currentGroupName = userGroup?.name || "QG";
 
   if (!currentUser) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className={`min-h-screen flex flex-col transition-colors duration-1000 ${isPartyMode ? 'bg-gradient-to-r from-purple-400 via-pink-500 to-red-500' : 'bg-gray-50'}`}>
+      
+      {isPartyMode && <Confetti />}
+      
+      <MiniGame 
+        isOpen={isGameOpen} 
+        onClose={() => setIsGameOpen(false)} 
+        groupName={currentGroupName}
+      />
+
       {/* Header */}
-      <header className="bg-white shadow-sm sticky top-0 z-10">
+      <header className={`bg-white shadow-sm sticky top-0 z-10 transition-opacity ${isPartyMode ? 'bg-opacity-90' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-             <h1 className="text-xl font-bold text-gray-900 tracking-tight">MIRA Équipe pour le challenge</h1>
+          <div className="flex items-center gap-4 select-none cursor-pointer" onClick={handleTitleClick}>
+             <h1 className="text-xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+                 MIRA Équipe pour le challenge
+                 {isPartyMode && <PartyPopper className="h-6 w-6 text-pink-500 animate-bounce" />}
+             </h1>
           </div>
           
           <div className="flex items-center gap-4">
@@ -384,7 +509,13 @@ function App() {
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium text-gray-900 flex items-center justify-end gap-1">
                 {currentUser.firstName} {currentUser.lastName}
-                {currentUser.isLeader && <Crown className="h-3 w-3 text-yellow-500 fill-yellow-500" />}
+                {currentUser.isLeader && (
+                  isSurferMode ? (
+                     <span className="text-sm ml-1" role="img" aria-label="surfer">🏄</span>
+                  ) : (
+                     <Crown className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+                  )
+                )}
               </p>
               <p className="text-xs text-gray-500">{currentUser.classType}</p>
             </div>
@@ -439,6 +570,8 @@ function App() {
                 onRename={handleRenameGroup}
                 groupLockDate={appConfig.consolidationDeadline}
                 leaderLockDate={appConfig.leaderLockDate}
+                isSurferMode={isSurferMode}
+                onOpenGame={() => setIsGameOpen(true)}
               />
             ))}
           </div>
@@ -448,7 +581,7 @@ function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-auto">
         <div className="max-w-7xl mx-auto px-4 py-6 text-center text-sm text-gray-500">
-          &copy; {new Date().getFullYear()} Nicolas Huloux for MIRA 
+          &copy; {new Date().getFullYear()} <span onClick={() => setIsSurferMode(p => !p)} className="cursor-pointer hover:text-indigo-600 transition-colors select-none" title="Surfer Mode ?">Nicolas Huloux</span> for MIRA 
         </div>
       </footer>
     </div>

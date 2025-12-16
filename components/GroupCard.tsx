@@ -15,6 +15,8 @@ interface GroupCardProps {
   onRename: (groupId: number, newName: string) => void;
   groupLockDate: Date;
   leaderLockDate: Date;
+  isSurferMode?: boolean;
+  onOpenGame?: () => void;
 }
 
 export const GroupCard: React.FC<GroupCardProps> = ({ 
@@ -26,7 +28,9 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   onAssignLeader,
   onRename,
   groupLockDate,
-  leaderLockDate
+  leaderLockDate,
+  isSurferMode = false,
+  onOpenGame
 }) => {
   const userInGroup = group.members.some(m => m.id === currentUser.id);
   const permission = canJoinGroup(allGroups, group.id, currentUser.classType);
@@ -140,39 +144,56 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             <p className="text-sm text-gray-400 italic">Aucun membre pour le moment</p>
           ) : (
             <ul className="text-sm space-y-1">
-              {group.members.map(member => (
-                <li key={member.id} className="flex justify-between items-center text-gray-700 bg-gray-50 px-2 py-1 rounded">
-                  <span className="truncate">{member.firstName} {member.lastName}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500 font-medium bg-white border border-gray-200 px-1.5 rounded">
-                      {member.classType === ClassType.INGENIEUR ? 'INGE' : member.classType}
+              {group.members.map(member => {
+                const isMe = member.id === currentUser.id;
+                return (
+                  <li key={member.id} className="flex justify-between items-center text-gray-700 bg-gray-50 px-2 py-1 rounded">
+                    <span 
+                        className={`truncate ${isMe ? 'cursor-pointer hover:text-indigo-600 font-medium select-none' : ''}`}
+                        onClick={() => isMe && onOpenGame && onOpenGame()}
+                        title={isMe ? "Cliquez pour un petit jeu..." : undefined}
+                    >
+                        {member.firstName} {member.lastName}
                     </span>
-                    
-                    {/* Leader Management */}
-                    {member.isLeader ? (
-                       // Active Leader
-                       <button 
-                         disabled={!userInGroup || !isLeaderSelectionOpen}
-                         title={isLeaderSelectionOpen && userInGroup ? "Chef d'équipe (cliquer pour changer)" : "Chef d'équipe"}
-                         className={`${isLeaderSelectionOpen && userInGroup ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'}`}
-                       >
-                         <Crown className="h-4 w-4 text-yellow-500 fill-yellow-500" />
-                       </button>
-                    ) : (
-                      // Not Leader - Click to Assign (only if in group and dates are valid)
-                      userInGroup && isLeaderSelectionOpen && (
-                         <button 
-                           onClick={() => onAssignLeader(group.id, member.id)}
-                           className="text-gray-200 hover:text-yellow-500 transition-colors"
-                           title="Désigner comme chef"
-                         >
-                           <Crown className="h-4 w-4" />
-                         </button>
-                      )
-                    )}
-                  </div>
-                </li>
-              ))}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500 font-medium bg-white border border-gray-200 px-1.5 rounded">
+                        {member.classType === ClassType.INGENIEUR ? 'INGE' : member.classType}
+                      </span>
+                      
+                      {/* Leader Management */}
+                      {member.isLeader ? (
+                        // Active Leader
+                        <button 
+                          disabled={!userInGroup || !isLeaderSelectionOpen}
+                          title={isLeaderSelectionOpen && userInGroup ? (isSurferMode ? "Chef surfeur (cliquer pour changer)" : "Chef d'équipe (cliquer pour changer)") : (isSurferMode ? "Chef surfeur" : "Chef d'équipe")}
+                          className={`${isLeaderSelectionOpen && userInGroup ? 'cursor-pointer hover:scale-110 transition-transform' : 'cursor-default'}`}
+                        >
+                          {isSurferMode ? (
+                            <span className="text-base leading-none select-none" role="img" aria-label="surfer">🏄</span>
+                          ) : (
+                            <Crown className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                          )}
+                        </button>
+                      ) : (
+                        // Not Leader - Click to Assign (only if in group and dates are valid)
+                        userInGroup && isLeaderSelectionOpen && (
+                          <button 
+                            onClick={() => onAssignLeader(group.id, member.id)}
+                            className="text-gray-200 hover:text-yellow-500 transition-colors"
+                            title={isSurferMode ? "Désigner comme surfeur" : "Désigner comme chef"}
+                          >
+                            {isSurferMode ? (
+                              <span className="text-base leading-none opacity-30 hover:opacity-100 grayscale hover:grayscale-0 transition-all select-none" role="img" aria-label="surfer-gray">🏄</span>
+                            ) : (
+                              <Crown className="h-4 w-4" />
+                            )}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -211,7 +232,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                 </span>
                 {isLeaderSelectionOpen ? (
                   <span className="text-[10px] text-gray-500">
-                    Cliquez sur une couronne pour désigner le chef.
+                    {isSurferMode ? "Cliquez sur un surfeur pour désigner le chef." : "Cliquez sur une couronne pour désigner le chef."}
                   </span>
                 ) : (
                   <span className="text-[10px] text-red-500 font-medium">
