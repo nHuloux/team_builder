@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, BookOpen, ChevronRight } from 'lucide-react';
+import { X, BookOpen, ChevronRight, Binary, ScanEye, Save } from 'lucide-react';
 import { Button } from './Button';
 import { Member } from '../types';
 
@@ -212,6 +212,11 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
   const [step, setStep] = useState<'intro' | 'result'>('intro');
   const [resultText, setResultText] = useState("");
   const [shuffledMembers, setShuffledMembers] = useState<string[]>([]);
+  
+  // Decryption State
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedId, setDecryptedId] = useState<number | null>(null);
+  const [displayId, setDisplayId] = useState("00");
 
   // 1. Determine Story of the Day based on Date
   useEffect(() => {
@@ -225,6 +230,9 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
       const storyIndex = dayOfYear % STORIES.length;
       setCurrentStory(STORIES[storyIndex]);
       setStep('intro');
+      setDecryptedId(null);
+      setIsDecrypting(false);
+      setDisplayId("00");
       
       // Shuffle members for random role assignment
       const names = members.length > 0 ? members.map(m => m.firstName) : ["Un Stagiaire", "Le Chef", "L'Inconnu"];
@@ -243,6 +251,31 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
     }
   }, [isOpen, members]);
 
+  // Decryption Animation Effect
+  useEffect(() => {
+    if (isDecrypting && currentStory) {
+      const duration = 2000; // 2 seconds
+      const interval = 50;
+      let elapsed = 0;
+
+      const timer = setInterval(() => {
+        elapsed += interval;
+        // Random 2 digit number
+        setDisplayId(Math.floor(Math.random() * 99).toString().padStart(2, '0'));
+
+        if (elapsed >= duration) {
+          clearInterval(timer);
+          setDisplayId(currentStory.id.toString());
+          setDecryptedId(currentStory.id);
+          setIsDecrypting(false);
+        }
+      }, interval);
+
+      return () => clearInterval(timer);
+    }
+  }, [isDecrypting, currentStory]);
+
+
   // Helper to replace {0}, {1} with names
   const formatText = (text: string) => {
     return text.replace(/\{(\d+)\}/g, (match, index) => {
@@ -254,6 +287,10 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
   const handleChoice = (option: StoryOption) => {
     setResultText(formatText(option.outcome));
     setStep('result');
+  };
+
+  const startDecryption = () => {
+    setIsDecrypting(true);
   };
 
   if (!isOpen || !currentStory) return null;
@@ -307,18 +344,54 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
                     </div>
                 </div>
             ) : (
-                <div className="space-y-8 animate-in slide-in-from-right duration-300 w-full">
-                    <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
+                <div className="space-y-6 animate-in slide-in-from-right duration-300 w-full flex flex-col items-center">
+                    <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-100 w-full">
                          <p className="text-xl text-indigo-900 leading-relaxed font-medium">
                             {resultText}
                         </p>
                     </div>
 
-                    <p className="text-sm text-gray-400 italic">
-                        Reviens demain pour une nouvelle aventure !
-                    </p>
+                    {/* Decryption Section */}
+                    <div className="w-full bg-slate-900 rounded-xl p-4 text-white border border-slate-700 shadow-inner relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-green-500 to-transparent opacity-30"></div>
+                        
+                        <div className="flex flex-col items-center justify-center gap-2">
+                             <div className="flex items-center gap-2 text-slate-400 text-xs uppercase tracking-widest mb-1">
+                                <Binary className="w-4 h-4" />
+                                Trace Mémoire Identifiée
+                             </div>
 
-                    <Button onClick={onClose} className="w-full py-3 text-lg">
+                             {decryptedId === null && !isDecrypting ? (
+                                <button 
+                                    onClick={startDecryption}
+                                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-bold transition-all shadow-lg hover:shadow-indigo-500/30 animate-pulse"
+                                >
+                                    <ScanEye className="w-5 h-5" />
+                                    ANALYSER LE CODE
+                                </button>
+                             ) : (
+                                <div className="flex flex-col items-center">
+                                    <span className={`text-4xl font-mono font-black ${decryptedId ? 'text-green-400' : 'text-indigo-400'}`}>
+                                        #{displayId}
+                                    </span>
+                                    {decryptedId && (
+                                        <span className="text-green-400 text-xs font-bold mt-1 animate-in fade-in zoom-in">
+                                            ARCHIVE DÉVERROUILLÉE
+                                        </span>
+                                    )}
+                                </div>
+                             )}
+                        </div>
+                    </div>
+
+                    {decryptedId && (
+                         <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                            <Save className="w-3 h-3" />
+                            Notez ce numéro dans le Codex (MIRA)
+                         </div>
+                    )}
+
+                    <Button onClick={onClose} className="w-full py-3 text-lg mt-2" variant="secondary">
                         Fermer le livre
                     </Button>
                 </div>
