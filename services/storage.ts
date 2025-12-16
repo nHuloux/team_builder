@@ -206,7 +206,7 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
 
 // --- BONUS / STORY GAME SERVICES ---
 
-// Fetch specific story of the day (prevents fetching all text)
+// Fetch specific story of the day
 export const fetchStory = async (id: number): Promise<Story | null> => {
   try {
     const { data, error } = await supabase
@@ -234,18 +234,40 @@ export const fetchStory = async (id: number): Promise<Story | null> => {
   }
 };
 
-// Fetch all titles for validation (returns lighter objects)
-export const fetchAllStoryTitles = async (): Promise<{id: number, title: string}[]> => {
+// NEW: Fetch ONLY titles for IDs that have been solved.
+// This prevents fetching the full list of answers.
+export const fetchSolvedTitles = async (ids: number[]): Promise<{id: number, title: string}[]> => {
+  if (ids.length === 0) return [];
   try {
     const { data, error } = await supabase
       .from('stories')
       .select('id, title')
+      .in('id', ids)
       .order('id');
     
     if (error || !data) return [];
     return data;
   } catch (e) {
-    console.error("Error fetching titles:", e);
+    console.error("Error fetching solved titles:", e);
+    return [];
+  }
+};
+
+// NEW: Server-side validation via RPC to avoid leaking answers
+export const validateTitles = async (guesses: {id: number, title: string}[]): Promise<{id: number, is_correct: boolean}[]> => {
+  if (guesses.length === 0) return [];
+  try {
+    // Requires CREATE FUNCTION validate_titles(guesses jsonb) in Supabase
+    const { data, error } = await supabase
+      .rpc('validate_titles', { guesses });
+
+    if (error) {
+        console.error("RPC Validation error:", error);
+        return [];
+    }
+    return data as {id: number, is_correct: boolean}[];
+  } catch (e) {
+    console.error("Error validating titles:", e);
     return [];
   }
 };

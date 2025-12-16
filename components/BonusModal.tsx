@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Lock, CheckCircle, Gift, AlertCircle, Save, Loader2 } from 'lucide-react';
 import { Button } from './Button';
-import { getGroupBonusProgress, saveGroupBonusProgress, getBonusWinner, claimBonusVictory, fetchAllStoryTitles } from '../services/storage';
+import { getGroupBonusProgress, saveGroupBonusProgress, getBonusWinner, claimBonusVictory, fetchSolvedTitles, validateTitles } from '../services/storage';
 
 interface BonusModalProps {
   isOpen: boolean;
@@ -19,8 +19,7 @@ export const BonusModal: React.FC<BonusModalProps> = ({ isOpen, onClose, groupId
   const [successCount, setSuccessCount] = useState(0);
   const [victoryState, setVictoryState] = useState<'none' | 'winner' | 'late'>('none');
   
-  // Store fetched titles here for comparison
-  const [correctTitles, setCorrectTitles] = useState<Map<number, string>>(new Map());
+  // We no longer store "correctTitles" for validation, only for display of already solved ones.
 
   useEffect(() => {
     if (isOpen && groupId > 0) {
@@ -31,35 +30,35 @@ export const BonusModal: React.FC<BonusModalProps> = ({ isOpen, onClose, groupId
   const loadData = async () => {
     setIsLoading(true);
     
-    // Parallel Fetch: Titles + Group Progress + Winner Status
-    const [titlesData, solvedIds, winnerId] = await Promise.all([
-        fetchAllStoryTitles(),
-        getGroupBonusProgress(groupId),
+    // 1. Get IDs of solved stories
+    const solvedIds = await getGroupBonusProgress(groupId); // e.g. [1, 5, 20]
+    
+    // 2. Fetch Titles ONLY for solved IDs (securely)
+    const [solvedTitlesData, winnerId] = await Promise.all([
+        fetchSolvedTitles(solvedIds),
         getBonusWinner()
     ]);
 
-    // Build Map for fast lookup (ID -> Title)
+    // Build Map for display (ID -> Title)
     const titlesMap = new Map<number, string>();
-    titlesData.forEach(t => titlesMap.set(t.id, t.title));
-    setCorrectTitles(titlesMap);
+    solvedTitlesData.forEach(t => titlesMap.set(t.id, t.title));
 
     // Pre-fill solved inputs
     const newInputs = Array(TOTAL_STORIES).fill('');
     const newValidation = Array(TOTAL_STORIES).fill(null);
     let count = 0;
 
-    // Restore saved progress
-    // If user has solved ID 1, put the title in input 0 (since ID 1 = index 0 in UI grid)
     solvedIds.forEach(id => {
        const title = titlesMap.get(id);
-       if (title) {
-           newInputs[id - 1] = title;
-           newValidation[id - 1] = true;
+       // Note: Arrays are 0-indexed, IDs are 1-indexed
+       const idx = id - 1; 
+       if (idx >= 0 && idx < TOTAL_STORIES) {
+           newInputs[idx] = title || "Titre trouvé"; // Fallback text if fetch fails
+           newValidation[idx] = true;
            count++;
        }
     });
 
-    // Preserve unsaved inputs if just re-opening (optional, but here we reset to saved state for consistency)
     setInputs(newInputs);
     setValidation(newValidation);
     setSuccessCount(count);
@@ -81,39 +80,63 @@ export const BonusModal: React.FC<BonusModalProps> = ({ isOpen, onClose, groupId
 
   const checkAnswers = async () => {
     setIsLoading(true);
-    const newValidation = [...validation];
-    const solvedIds: number[] = [];
-    let newCount = 0;
-
-    // Check Logic
+    
+    // Collect guesses for unsolved items
+    const guesses: {id: number, title: string}[] = [];
     inputs.forEach((input, idx) => {
-      const storyId = idx + 1; // Index 0 is Story ID 1
-      const correctTitle = correctTitles.get(storyId)?.trim().toLowerCase();
-      const userTitle = input.trim().toLowerCase();
-      
-      if (correctTitle && correctTitle === userTitle) {
-        newValidation[idx] = true;
-        solvedIds.push(storyId);
-        newCount++;
-      } else {
-        // Only mark false if they typed something
-        newValidation[idx] = input.trim() !== '' ? false : null; 
-      }
+        // Only check if it's not already validated and user typed something
+        if (validation[idx] !== true && input.trim() !== '') {
+            guesses.push({
+                id: idx + 1, // Convert index to ID
+                title: input.trim()
+            });
+        }
     });
 
-    setValidation(newValidation);
-    setSuccessCount(newCount);
+    if (guesses.length === 0) {
+        setIsLoading(false);
+        return;
+    }
 
-    // Save
-    await saveGroupBonusProgress(groupId, solvedIds);
+    // Server-side Validation
+    const results = await validateTitles(guesses);
+
+    // Apply results
+    const newValidation = [...validation];
+    // We need to fetch the newly found titles to display them properly locked
+    // (Wait, we can just use what the user typed if it's correct, but fetching is cleaner or we trust the input)
+    // Actually, if it's correct, we lock the input with the user's typed value.
+    
+    const newSolvedIds: number[] = [];
+
+    results.forEach(res => {
+        const idx = res.id - 1;
+        if (res.is_correct) {
+            newValidation[idx] = true;
+            newSolvedIds.push(res.id);
+        } else {
+            newValidation[idx] = false;
+        }
+    });
+
+    // Merge with existing solved IDs
+    const currentSolvedIds = await getGroupBonusProgress(groupId);
+    const uniqueSolvedIds = Array.from(new Set([...currentSolvedIds, ...newSolvedIds]));
+    
+    // Save progress
+    if (newSolvedIds.length > 0) {
+        await saveGroupBonusProgress(groupId, uniqueSolvedIds);
+    }
+    
+    setValidation(newValidation);
+    setSuccessCount(uniqueSolvedIds.length);
 
     // Check Victory
-    if (newCount === TOTAL_STORIES) {
+    if (uniqueSolvedIds.length === TOTAL_STORIES) {
         const isWinner = await claimBonusVictory(groupId);
         if (isWinner) {
             setVictoryState('winner');
         } else {
-            // Check who won
             const winnerId = await getBonusWinner();
             if (winnerId === groupId) setVictoryState('winner');
             else setVictoryState('late');
@@ -168,45 +191,40 @@ export const BonusModal: React.FC<BonusModalProps> = ({ isOpen, onClose, groupId
 
         {/* Content - Grid of Inputs */}
         <div className="flex-1 overflow-y-auto p-6 bg-slate-800 custom-scrollbar">
-            {isLoading && correctTitles.size === 0 ? (
-                 <div className="flex justify-center items-center h-full text-slate-400">
-                    <Loader2 className="w-8 h-8 animate-spin mr-2" />
-                    Chargement des données...
-                 </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {Array.from({ length: TOTAL_STORIES }).map((_, idx) => {
-                        const storyId = idx + 1;
-                        return (
-                            <div key={storyId} className="flex items-center gap-3 bg-slate-700/50 p-3 rounded-lg border border-slate-600">
-                                <span className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-800 text-slate-400 font-mono text-sm border border-slate-600 shrink-0">
-                                    #{storyId}
-                                </span>
-                                <div className="relative flex-1">
-                                    <input 
-                                        type="text"
-                                        value={inputs[idx]}
-                                        onChange={(e) => handleInputChange(idx, e.target.value)}
-                                        disabled={validation[idx] === true}
-                                        placeholder={`Titre de l'histoire ${storyId}...`}
-                                        className={`w-full bg-slate-900 border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-all
-                                            ${validation[idx] === true 
-                                                ? 'border-green-500/50 text-green-400 font-medium' 
-                                                : validation[idx] === false 
-                                                    ? 'border-red-500/50 text-white focus:ring-red-500'
-                                                    : 'border-slate-700 text-white focus:ring-indigo-500'
-                                            }
-                                        `}
-                                    />
-                                    {validation[idx] === true && (
-                                        <CheckCircle className="absolute right-3 top-2.5 w-4 h-4 text-green-500" />
-                                    )}
-                                </div>
+             {/* No "Loading Data" blocking state anymore, we show inputs immediately */}
+             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Array.from({ length: TOTAL_STORIES }).map((_, idx) => {
+                    const storyId = idx + 1;
+                    return (
+                        <div key={storyId} className="flex items-center gap-3 bg-slate-700/50 p-3 rounded-lg border border-slate-600">
+                            <span className="flex items-center justify-center w-8 h-8 rounded-full bg-slate-800 text-slate-400 font-mono text-sm border border-slate-600 shrink-0">
+                                #{storyId}
+                            </span>
+                            <div className="relative flex-1">
+                                <input 
+                                    type="text"
+                                    value={inputs[idx]}
+                                    onChange={(e) => handleInputChange(idx, e.target.value)}
+                                    disabled={validation[idx] === true}
+                                    placeholder={`Titre de l'histoire ${storyId}...`}
+                                    className={`w-full bg-slate-900 border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 transition-all
+                                        ${validation[idx] === true 
+                                            ? 'border-green-500/50 text-green-400 font-medium' 
+                                            : validation[idx] === false 
+                                                ? 'border-red-500/50 text-white focus:ring-red-500'
+                                                : 'border-slate-700 text-white focus:ring-indigo-500'
+                                        }
+                                    `}
+                                />
+                                {validation[idx] === true && (
+                                    <CheckCircle className="absolute right-3 top-2.5 w-4 h-4 text-green-500" />
+                                )}
                             </div>
-                        );
-                    })}
-                </div>
-            )}
+                        </div>
+                    );
+                })}
+            </div>
         </div>
 
         {/* Footer Actions */}
