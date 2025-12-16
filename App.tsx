@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Login } from './components/Login';
 import { GroupCard } from './components/GroupCard';
 import { MiniGame } from './components/MiniGame';
+import { BonusModal } from './components/BonusModal';
 import { User, Group, AppConfig, DEFAULT_CORE_TEAM_DEADLINE, DEFAULT_CONSOLIDATION_DEADLINE, DEFAULT_LEADER_LOCK_DATE, DEFAULT_CHALLENGE_START } from './types';
 import { 
   getCurrentUser, 
@@ -301,11 +302,12 @@ function App() {
   });
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   
-  // Easter Egg States
+  // Easter Egg & Game States
   const [titleClicks, setTitleClicks] = useState(0);
   const [isPartyMode, setIsPartyMode] = useState(false);
   const [isSurferMode, setIsSurferMode] = useState(false);
-  const [isGameOpen, setIsGameOpen] = useState(false); // Mini Game State
+  const [isGameOpen, setIsGameOpen] = useState(false);
+  const [isBonusModalOpen, setIsBonusModalOpen] = useState(false);
   const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initial Load
@@ -461,6 +463,15 @@ function App() {
     }, 1000); // Reset count if no click for 1 second
   };
 
+  const handleBonusOpen = () => {
+      // Only allow opening if user is in a group
+      if (currentUser?.groupId && currentUser.groupId > 0) {
+          setIsBonusModalOpen(true);
+      } else {
+          alert("Vous devez rejoindre une équipe pour accéder aux Archives.");
+      }
+  };
+
   const isAdmin = currentUser?.firstName === 'Nicolas' && currentUser?.lastName === 'Huloux';
 
   const userGroup = groups.find(g => g.id === currentUser?.groupId);
@@ -480,6 +491,13 @@ function App() {
         onClose={() => setIsGameOpen(false)} 
         groupName={currentGroupName}
         members={userGroup?.members || []}
+      />
+
+      <BonusModal 
+        isOpen={isBonusModalOpen}
+        onClose={() => setIsBonusModalOpen(false)}
+        groupId={currentUser.groupId || 0}
+        groupName={currentGroupName}
       />
 
       {/* Header */}
@@ -580,7 +598,7 @@ function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-auto">
         <div className="max-w-7xl mx-auto px-4 py-6 text-center text-sm text-gray-500">
-          &copy; {new Date().getFullYear()} <span onClick={() => setIsSurferMode(p => !p)} className="cursor-pointer hover:text-indigo-600 transition-colors select-none" title="Surfer Mode ?">Nicolas Huloux</span> for MIRA 
+          &copy; {new Date().getFullYear()} <span onClick={() => setIsSurferMode(p => !p)} className="cursor-pointer hover:text-indigo-600 transition-colors select-none" title="Surfer Mode ?">Nicolas Huloux</span> for <span onClick={handleBonusOpen} className="font-bold text-indigo-600 cursor-pointer hover:underline hover:text-indigo-800 transition-colors" title="Accéder aux Archives">MIRA</span>
         </div>
       </footer>
     </div>

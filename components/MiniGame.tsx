@@ -17,14 +17,14 @@ interface StoryOption {
   emoji: string;
 }
 
-interface Story {
+export interface Story {
   id: number;
   title: string;
   intro: string; // Uses {0}, {1}, {2} for shuffled members
   options: [StoryOption, StoryOption];
 }
 
-const STORIES: Story[] = [
+export const STORIES: Story[] = [
   {
     id: 1,
     title: "La Machine à Café Maudite",
@@ -238,8 +238,6 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
       // Ensure we have enough names by cycling if group is small
       while (shuffled.length < 3) {
          shuffled.push(shuffled[shuffled.length % names.length]);
-         // Add a suffix to differentiate if it's the exact same string pointer (though strings are primitives)
-         // Actually better to just reuse the name logic in formattedText
       }
       setShuffledMembers(shuffled);
     }

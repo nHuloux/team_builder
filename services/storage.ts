@@ -36,7 +36,7 @@ const hashPassword = async (password: string): Promise<string> => {
 
 // --- Core Service Logic ---
 
-// Transform DB users into Group objects
+// Transform DB users into Groups
 const transformUsersToGroups = (users: DBUser[]): Group[] => {
   // Initialize empty groups
   const groups: Group[] = Array.from({ length: TOTAL_GROUPS }, (_, i) => ({
@@ -204,6 +204,85 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
   }
 };
 
+// --- BONUS / STORY GAME SERVICES ---
+
+// Save Group Progress for Bonus Game
+// Stores an array of found story IDs (e.g. [1, 5, 20])
+export const saveGroupBonusProgress = async (groupId: number, foundIds: number[]): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('challenge_config')
+      .upsert(
+        { key: `GROUP_BONUS_PROGRESS_${groupId}`, value: JSON.stringify(foundIds) },
+        { onConflict: 'key' }
+      );
+
+    if (error) {
+      console.error("Failed to save bonus progress:", error.message);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("Error saving bonus progress:", error);
+    return false;
+  }
+};
+
+// Get Group Progress
+export const getGroupBonusProgress = async (groupId: number): Promise<number[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('challenge_config')
+      .select('value')
+      .eq('key', `GROUP_BONUS_PROGRESS_${groupId}`)
+      .single();
+
+    if (error || !data) return [];
+    return JSON.parse(data.value);
+  } catch (error) {
+    return [];
+  }
+};
+
+// Check if there is already a winner
+export const getBonusWinner = async (): Promise<number | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('challenge_config')
+      .select('value')
+      .eq('key', 'BONUS_WINNER_GROUP_ID')
+      .single();
+
+    if (error || !data) return null;
+    return parseInt(data.value, 10);
+  } catch (error) {
+    return null;
+  }
+};
+
+// Set Winner (Atomic check not perfect here but sufficient for this scale)
+export const claimBonusVictory = async (groupId: number): Promise<boolean> => {
+  // First check if someone already won
+  const currentWinner = await getBonusWinner();
+  if (currentWinner !== null) {
+      if (currentWinner === groupId) return true; // Already won
+      return false; // Someone else won
+  }
+
+  try {
+     const { error } = await supabase
+      .from('challenge_config')
+      .insert({ key: 'BONUS_WINNER_GROUP_ID', value: groupId.toString() });
+      
+     // If error (e.g. duplicate key), it means someone beat us to it in the milliseconds
+     if (error) return false;
+     return true;
+  } catch (e) {
+      return false;
+  }
+};
+
+
 // LOGIN / CREATE USER WITH PASSWORD
 export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string): Promise<User> => {
   // Normalize ID generation: lowercase and trim
@@ -240,11 +319,6 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
       // 1a. User exists
       if (existingUser.password) {
         // CHECK PASSWORD
-        // Strategy:
-        // 1. Secure Check: Does the DB hash match the hash of the trimmed input?
-        // 2. Legacy Check A: Does the DB plain text match the RAW input? (e.g. "password ")
-        // 3. Legacy Check B: Does the DB plain text match the TRIMMED input? (e.g. "password")
-        
         const dbPassword = existingUser.password;
         
         const isHashMatch = dbPassword === hashedPassword;
@@ -252,27 +326,25 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         const isPlainMatchTrimmed = dbPassword === passwordTrimmed;
 
         if (isHashMatch) {
-            // Success: Already migrated and correct.
+            // Success
         } else if (isPlainMatchRaw || isPlainMatchTrimmed) {
-            // Success: Matches plain text (either raw or trimmed).
-            // MIGRATION: Update DB with the hashed version (trimmed) for next time.
+            // Success: Matches plain text. MIGRATION to Hash.
             await supabase
               .from('project_members')
               .update({ password: hashedPassword })
               .eq('id', generatedId);
         } else {
-            // Neither hash nor plain text matched
             throw new Error("Mot de passe incorrect.");
         }
       } else {
-        // If user exists but has no password, set it.
+        // User exists, set password
         await supabase
           .from('project_members')
           .update({ password: hashedPassword })
           .eq('id', generatedId);
       }
 
-      // Update DB class_type to match current login if different
+      // Update DB class_type if needed
       if (existingUser.class_type !== userCandidate.classType) {
          await supabase.from('project_members').update({ class_type: userCandidate.classType }).eq('id', generatedId);
       }
@@ -323,7 +395,6 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
     if (error.message === "Mot de passe incorrect." || error.message === "Le mot de passe est requis.") {
       throw error;
     }
-    // Don't expose internal errors to UI too bluntly, but useful for debugging this issue
     throw new Error(error.message || "Erreur de connexion avec la base de données.");
   }
 };
@@ -358,8 +429,6 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
 // LEAVE GROUP
 export const leaveGroup = async (userId: string): Promise<boolean> => {
   try {
-    // Set group_id to 0 to remove from any active group (1-9)
-    // We do NOT use select() to avoid RLS return data issues, assuming permission to update own row exists
     const { error } = await supabase
       .from('project_members')
       .update({ group_id: 0, is_leader: false })
