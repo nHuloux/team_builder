@@ -1,5 +1,5 @@
 
-import { Group, User, Member, TOTAL_GROUPS, ClassType, QUOTAS, AppConfig, DEFAULT_CORE_TEAM_DEADLINE, DEFAULT_CONSOLIDATION_DEADLINE, DEFAULT_LEADER_LOCK_DATE, DEFAULT_CHALLENGE_START } from '../types';
+import { Group, User, Member, TOTAL_GROUPS, ClassType, QUOTAS, AppConfig, DEFAULT_CORE_TEAM_DEADLINE, DEFAULT_CONSOLIDATION_DEADLINE, DEFAULT_LEADER_LOCK_DATE, DEFAULT_CHALLENGE_START, Story, DBStory } from '../types';
 import { supabase } from './supabaseClient';
 
 const STORAGE_KEY_CURRENT_USER = 'teambuilder_current_user';
@@ -205,6 +205,50 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
 };
 
 // --- BONUS / STORY GAME SERVICES ---
+
+// Fetch specific story of the day (prevents fetching all text)
+export const fetchStory = async (id: number): Promise<Story | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('stories')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error || !data) return null;
+
+    const row = data as DBStory;
+    
+    return {
+      id: row.id,
+      title: row.title,
+      intro: row.intro,
+      options: [
+        { text: row.opt1_text, outcome: row.opt1_outcome, emoji: row.opt1_emoji },
+        { text: row.opt2_text, outcome: row.opt2_outcome, emoji: row.opt2_emoji }
+      ]
+    };
+  } catch (e) {
+    console.error("Error fetching story:", e);
+    return null;
+  }
+};
+
+// Fetch all titles for validation (returns lighter objects)
+export const fetchAllStoryTitles = async (): Promise<{id: number, title: string}[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('stories')
+      .select('id, title')
+      .order('id');
+    
+    if (error || !data) return [];
+    return data;
+  } catch (e) {
+    console.error("Error fetching titles:", e);
+    return [];
+  }
+};
 
 // Save Group Progress for Bonus Game
 // Stores an array of found story IDs (e.g. [1, 5, 20])

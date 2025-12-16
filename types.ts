@@ -24,6 +24,32 @@ export interface Group {
   members: Member[];
 }
 
+export interface StoryOption {
+  text: string;
+  outcome: string;
+  emoji: string;
+}
+
+export interface Story {
+  id: number;
+  title: string;
+  intro: string;
+  options: [StoryOption, StoryOption];
+}
+
+// Helper type for direct DB row mapping
+export interface DBStory {
+  id: number;
+  title: string;
+  intro: string;
+  opt1_text: string;
+  opt1_outcome: string;
+  opt1_emoji: string;
+  opt2_text: string;
+  opt2_outcome: string;
+  opt2_emoji: string;
+}
+
 export const QUOTAS = {
   [ClassType.INGENIEUR]: 1,
   [ClassType.MIND]: 2,
