@@ -371,8 +371,6 @@ function App() {
     if (success) {
       await loadData(); 
       setUser(prev => prev ? { ...prev, groupId } : null);
-      // Trigger Game on successful join
-      setIsGameOpen(true);
     }
     setIsActionLoading(false);
   };
