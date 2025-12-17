@@ -57,6 +57,14 @@ export const fetchGroups = async (): Promise<Group[]> => {
       if (row.key.startsWith('GROUP_NAME_')) {
         const id = parseInt(row.key.replace('GROUP_NAME_', ''));
         if (groups[id - 1]) groups[id - 1].name = row.value;
+      } else if (row.key.startsWith('GROUP_BONUS_PROGRESS_')) {
+        const id = parseInt(row.key.replace('GROUP_BONUS_PROGRESS_', ''));
+        try {
+            const foundIds = JSON.parse(row.value);
+            if (Array.isArray(foundIds) && foundIds.length >= 20 && groups[id - 1]) {
+                groups[id - 1].bonusCompleted = true;
+            }
+        } catch(e) {}
       }
     });
 
@@ -83,7 +91,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
 
   if (error) {
     console.error("Login RPC Error:", error.message);
-    throw new Error(error.message === 'Mot de passe incorrect' ? error.message : "Erreur de base de données. Vérifiez l'installation des fonctions SQL.");
+    throw new Error(error.message === 'Mot de passe incorrect' ? error.message : "Erreur de connexion.");
   }
 
   const user: User = {
@@ -106,14 +114,8 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
       p_user_id: userId,
       p_group_id: groupId
     });
-
-    if (error) {
-      console.error("joinGroup RPC Error:", error.message || JSON.stringify(error));
-      return false;
-    }
-    return true;
+    return !error;
   } catch (error: any) {
-    console.error("joinGroup exception:", error.message || error);
     return false;
   }
 };
@@ -122,10 +124,8 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
 export const leaveGroup = async (userId: string): Promise<boolean> => {
   try {
     const { error } = await supabase.rpc('leave_team', { p_user_id: userId });
-    if (error) throw error;
-    return true;
+    return !error;
   } catch (error: any) {
-    console.error("leaveGroup error:", error.message || error);
     return false;
   }
 };
@@ -181,15 +181,21 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
   } catch { return false; }
 };
 
+// --- HISTOIRES ---
+
 export const fetchStory = async (id: number, isSurferMode: boolean = false): Promise<Story | null> => {
     try {
-        const { data, error } = await supabase.from('stories').select('*').eq('id', id).single();
-        if (error || !data) return null;
+        const rpcName = isSurferMode ? 'get_story_by_id' : 'get_story_secure';
+        const { data, error } = await supabase.rpc(rpcName, isSurferMode ? { p_id: id } : { target_id: id });
+
+        if (error || !data || data.length === 0) return null;
+        
+        const row = data[0];
         return {
-            id: data.id, title: data.title, intro: data.intro,
+            id: row.id, title: row.title, intro: row.intro,
             options: [
-                { text: data.opt1_text, outcome: data.opt1_outcome, emoji: data.opt1_emoji },
-                { text: data.opt2_text, outcome: data.opt2_outcome, emoji: data.opt2_emoji }
+                { text: row.opt1_text, outcome: row.opt1_outcome, emoji: row.opt1_emoji },
+                { text: row.opt2_text, outcome: row.opt2_outcome, emoji: row.opt2_emoji }
             ]
         };
     } catch { return null; }
@@ -200,6 +206,69 @@ export const getDailyStoryId = (): number => {
     const dayOfYear = Math.floor((today.getTime() - new Date(today.getFullYear(), 0, 0).getTime()) / 86400000);
     return (dayOfYear % 20) + 1;
 };
+
+// --- CODEX / BONUS ---
+
+export const getGroupBonusProgress = async (groupId: number): Promise<number[]> => {
+    try {
+        const { data, error } = await supabase.rpc('get_all_challenge_config');
+        if (error) return [];
+        const row = (data || []).find((r: any) => r.key === `GROUP_BONUS_PROGRESS_${groupId}`);
+        return row ? JSON.parse(row.value) : [];
+    } catch { return []; }
+};
+
+export const saveGroupBonusProgress = async (groupId: number, foundIds: number[]): Promise<boolean> => {
+    try {
+        const { error } = await supabase.rpc('save_group_bonus_progress', {
+            p_group_id: groupId,
+            p_value: JSON.stringify(foundIds)
+        });
+        if (error) console.error("RPC save_group_bonus_progress error:", error.message);
+        return !error;
+    } catch { return false; }
+};
+
+export const fetchSolvedTitles = async (ids: number[]): Promise<{id: number, title: string}[]> => {
+    if (ids.length === 0) return [];
+    try {
+        const { data, error } = await supabase.rpc('get_story_titles', { p_ids: ids });
+        return data || [];
+    } catch { return []; }
+};
+
+export const validateTitles = async (guesses: {id: number, title: string}[]): Promise<{id: number, is_correct: boolean}[]> => {
+    try {
+        const { data, error } = await supabase.rpc('verify_story_titles', { guesses });
+        if (error) {
+            console.error("RPC verify_story_titles error:", error.message);
+            return [];
+        }
+        return data || [];
+    } catch (e) {
+        console.error("validateTitles exception:", e);
+        return [];
+    }
+};
+
+export const getBonusWinner = async (): Promise<number | null> => {
+    try {
+        const { data } = await supabase.rpc('get_all_challenge_config');
+        const row = (data || []).find((r: any) => r.key === 'BONUS_WINNER_GROUP_ID');
+        return row ? parseInt(row.value) : null;
+    } catch { return null; }
+};
+
+export const claimBonusVictory = async (groupId: number): Promise<boolean> => {
+    try {
+        const winner = await getBonusWinner();
+        if (winner !== null) return winner === groupId;
+        const { error } = await supabase.from('challenge_config').insert({ key: 'BONUS_WINNER_GROUP_ID', value: groupId.toString() });
+        return !error;
+    } catch { return false; }
+};
+
+// --- VALIDATION UI ---
 
 export const canJoinGroup = (groups: Group[], groupId: number, userClass: ClassType): { allowed: boolean; reason?: string } => {
   const group = groups.find(g => g.id === groupId);
@@ -214,10 +283,3 @@ export const canJoinGroup = (groups: Group[], groupId: number, userClass: ClassT
   }
   return { allowed: true };
 };
-
-export const getGroupBonusProgress = async (id: number) => [];
-export const getBonusWinner = async () => null;
-export const fetchSolvedTitles = async (ids: number[]) => [];
-export const validateTitles = async (g: any) => [];
-export const saveGroupBonusProgress = async (id: number, ids: number[]) => true;
-export const claimBonusVictory = async (id: number) => false;

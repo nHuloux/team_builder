@@ -16,7 +16,7 @@ import {
   fetchAppConfig,
   updateAppConfig
 } from './services/storage';
-import { LogOut, RefreshCw, CheckCircle2, Settings, X, Crown, Clock, PartyPopper } from 'lucide-react';
+import { LogOut, RefreshCw, Settings, Crown, PartyPopper } from 'lucide-react';
 import { Button } from './components/Button';
 
 function App() {
@@ -38,7 +38,6 @@ function App() {
   useEffect(() => {
     const user = getCurrentUser();
     if (user) {
-      console.log("Utilisateur connecté :", user.id);
       setUser(user);
     }
     loadData();
@@ -68,7 +67,7 @@ function App() {
   const handleJoinGroup = async (groupId: number) => {
     if (!currentUser) return;
     if (new Date() > appConfig.consolidationDeadline) {
-      alert("Équipes figées.");
+      alert("La phase de constitution est terminée. Les équipes sont figées.");
       return;
     }
     setIsActionLoading(true);
@@ -77,7 +76,7 @@ function App() {
       await loadData();
       setUser(prev => prev ? { ...prev, groupId } : null);
     } else {
-      alert("Erreur BDD : Le bouton n'a pas pu modifier votre groupe. Vérifiez les fonctions SQL.");
+      alert("Impossible de rejoindre le groupe. Vérifiez les quotas ou les fonctions SQL.");
     }
     setIsActionLoading(false);
   };
@@ -105,24 +104,55 @@ function App() {
     setIsActionLoading(false);
   };
 
-  // Reconnaissance Admin robuste par ID normalisé
+  const handleBonusOpen = () => {
+      if (currentUser?.groupId && currentUser.groupId > 0) {
+          setIsBonusModalOpen(true);
+      } else {
+          alert("Rejoignez une équipe d'abord pour accéder aux Archives !");
+      }
+  };
+
+  // Admin Check
   const isAdmin = currentUser?.id?.toLowerCase().includes('nicolas-huloux');
+  const userGroup = groups.find(g => g.id === currentUser?.groupId);
 
   if (!currentUser) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
+      
+      {/* Modals de contenu */}
+      <MiniGame 
+        isOpen={isGameOpen} 
+        onClose={() => setIsGameOpen(false)} 
+        groupName={userGroup?.name || "Mon Équipe"}
+        members={userGroup?.members || []}
+        isSurferMode={isSurferMode}
+      />
+
+      <BonusModal 
+        isOpen={isBonusModalOpen}
+        onClose={() => setIsBonusModalOpen(false)}
+        groupId={currentUser.groupId || 0}
+        groupName={userGroup?.name || ""}
+      />
+
       <header className="bg-white shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-gray-900">MIRA Équipe</h1>
+          <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            MIRA Équipe
+          </h1>
           <div className="flex items-center gap-4">
             {isAdmin && (
-              <Button variant="outline" size="sm" onClick={() => setIsAdminModalOpen(true)}>
-                <Settings className="h-4 w-4 mr-2" /> Admin
+              <Button variant="outline" size="sm" onClick={() => alert("Édition des dates via Supabase 'challenge_config' pour le moment.")}>
+                <Settings className="h-4 w-4 sm:mr-2" /> <span className="hidden sm:inline">Admin</span>
               </Button>
             )}
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium">{currentUser.firstName} {currentUser.lastName}</p>
+              <p className="text-sm font-medium flex items-center gap-1">
+                {currentUser.firstName} {currentUser.lastName}
+                {currentUser.isLeader && <Crown className="h-3 w-3 text-yellow-500 fill-yellow-500" />}
+              </p>
               <p className="text-xs text-gray-500">{currentUser.classType}</p>
             </div>
             <Button variant="outline" size="sm" onClick={handleLogout}><LogOut className="h-4 w-4" /></Button>
@@ -137,6 +167,23 @@ function App() {
           </div>
         )}
 
+        {/* Info barre */}
+        <div className="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-100 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <p className="text-sm text-indigo-800 font-medium">
+               Phase actuelle : <span className="font-bold">Constitution des équipes</span> 
+               <span className="text-indigo-600 ml-2">(jusqu'au {appConfig.consolidationDeadline.toLocaleDateString('fr-FR')})</span>
+            </p>
+            {currentUser.groupId ? (
+              <div className="flex items-center gap-2 text-sm text-green-700 font-bold bg-green-50 px-3 py-1 rounded-full border border-green-200">
+                <PartyPopper className="h-4 w-4" /> Équipe rejointe !
+              </div>
+            ) : (
+              <div className="text-sm text-red-600 font-bold animate-pulse">
+                Vous n'avez pas encore d'équipe
+              </div>
+            )}
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {groups.map(group => (
             <GroupCard 
@@ -150,11 +197,26 @@ function App() {
               onRename={handleRenameGroup}
               groupLockDate={appConfig.consolidationDeadline}
               leaderLockDate={appConfig.leaderLockDate}
+              isSurferMode={isSurferMode}
               isAdmin={isAdmin}
+              onOpenGame={() => setIsGameOpen(true)}
             />
           ))}
         </div>
       </main>
+
+      <footer className="bg-white border-t border-gray-200 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 py-6 text-center text-sm text-gray-500 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div>
+            &copy; {new Date().getFullYear()} <span onClick={() => setIsSurferMode(!isSurferMode)} className="cursor-pointer hover:text-indigo-600 transition-colors select-none" title="Surfer Mode ?">Nicolas Huloux</span>
+          </div>
+          <div className="flex items-center gap-4">
+             <span onClick={handleBonusOpen} className="font-bold text-indigo-600 cursor-pointer hover:underline hover:text-indigo-800 transition-colors" title="Accéder aux Archives">
+               Accéder aux Archives MIRA
+             </span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
