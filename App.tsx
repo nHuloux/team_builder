@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Login } from './components/Login';
 import { GroupCard } from './components/GroupCard';
 import { MiniGame } from './components/MiniGame';
@@ -13,10 +13,9 @@ import {
   leaveGroup,
   assignLeader,
   updateGroupName,
-  fetchAppConfig,
-  updateAppConfig
+  fetchAppConfig
 } from './services/storage';
-import { LogOut, RefreshCw, Settings, Crown, PartyPopper } from 'lucide-react';
+import { LogOut, RefreshCw, Settings, Crown, PartyPopper, Users, ShieldCheck, Rocket, CheckCircle2, Clock } from 'lucide-react';
 import { Button } from './components/Button';
 
 function App() {
@@ -30,7 +29,6 @@ function App() {
     leaderLockDate: DEFAULT_LEADER_LOCK_DATE,
     challengeStart: DEFAULT_CHALLENGE_START
   });
-  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isGameOpen, setIsGameOpen] = useState(false);
   const [isBonusModalOpen, setIsBonusModalOpen] = useState(false);
   const [isSurferMode, setIsSurferMode] = useState(false);
@@ -112,6 +110,30 @@ function App() {
       }
   };
 
+  // Phase calculation
+  const now = new Date();
+  const getPhaseStatus = (phase: number) => {
+    switch(phase) {
+      case 1: return now < appConfig.coreTeamDeadline ? 'current' : 'passed';
+      case 2: 
+        if (now < appConfig.coreTeamDeadline) return 'upcoming';
+        return now < appConfig.consolidationDeadline ? 'current' : 'passed';
+      case 3:
+        if (now < appConfig.consolidationDeadline) return 'upcoming';
+        return now < appConfig.leaderLockDate ? 'current' : 'passed';
+      case 4:
+        return now < appConfig.leaderLockDate ? 'upcoming' : 'current';
+      default: return 'upcoming';
+    }
+  };
+
+  const phases = [
+    { id: 1, title: 'Constitution', icon: Users, date: appConfig.coreTeamDeadline, desc: 'Formation des noyaux durs' },
+    { id: 2, title: 'Consolidation', icon: ShieldCheck, date: appConfig.consolidationDeadline, desc: 'Équipes verrouillées' },
+    { id: 3, title: 'Élection', icon: Crown, date: appConfig.leaderLockDate, desc: 'Désignation des chefs' },
+    { id: 4, title: 'Immersion', icon: Rocket, date: appConfig.challengeStart, desc: 'Lancement MIRA' }
+  ];
+
   // Admin Check
   const isAdmin = currentUser?.id?.toLowerCase().includes('nicolas-huloux');
   const userGroup = groups.find(g => g.id === currentUser?.groupId);
@@ -121,7 +143,6 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       
-      {/* Modals de contenu */}
       <MiniGame 
         isOpen={isGameOpen} 
         onClose={() => setIsGameOpen(false)} 
@@ -149,7 +170,7 @@ function App() {
               </Button>
             )}
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium flex items-center gap-1">
+              <p className="text-sm font-medium flex items-center gap-1 text-gray-900">
                 {currentUser.firstName} {currentUser.lastName}
                 {currentUser.isLeader && <Crown className="h-3 w-3 text-yellow-500 fill-yellow-500" />}
               </p>
@@ -167,22 +188,71 @@ function App() {
           </div>
         )}
 
-        {/* Info barre */}
-        <div className="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-100 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <p className="text-sm text-indigo-800 font-medium">
-               Phase actuelle : <span className="font-bold">Constitution des équipes</span> 
-               <span className="text-indigo-600 ml-2">(jusqu'au {appConfig.consolidationDeadline.toLocaleDateString('fr-FR')})</span>
-            </p>
+        {/* Info barre & Timeline */}
+        <section className="mb-10">
+          <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-indigo-600" />
+              Le Processus MIRA
+            </h2>
             {currentUser.groupId ? (
-              <div className="flex items-center gap-2 text-sm text-green-700 font-bold bg-green-50 px-3 py-1 rounded-full border border-green-200">
+              <div className="flex items-center gap-2 text-sm text-green-700 font-bold bg-green-50 px-3 py-1.5 rounded-full border border-green-200 shadow-sm">
                 <PartyPopper className="h-4 w-4" /> Équipe rejointe !
               </div>
             ) : (
-              <div className="text-sm text-red-600 font-bold animate-pulse">
+              <div className="text-sm text-red-600 font-bold animate-pulse bg-red-50 px-3 py-1.5 rounded-full border border-red-100">
                 Vous n'avez pas encore d'équipe
               </div>
             )}
-        </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {phases.map((p) => {
+              const status = getPhaseStatus(p.id);
+              const Icon = p.icon;
+              return (
+                <div 
+                  key={p.id}
+                  className={`relative p-4 rounded-xl border transition-all duration-300 ${
+                    status === 'current' 
+                      ? 'bg-white border-indigo-400 shadow-md ring-1 ring-indigo-400/30' 
+                      : status === 'passed'
+                        ? 'bg-gray-50 border-gray-200 opacity-75'
+                        : 'bg-gray-50/50 border-gray-100'
+                  }`}
+                >
+                  {status === 'current' && (
+                    <span className="absolute -top-2.5 right-4 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider animate-bounce">
+                      Actuel
+                    </span>
+                  )}
+                  {status === 'passed' && (
+                    <CheckCircle2 className="absolute top-3 right-3 w-5 h-5 text-green-500" />
+                  )}
+                  
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`p-2 rounded-lg ${
+                      status === 'current' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-400'
+                    }`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className={`text-sm font-bold ${status === 'current' ? 'text-gray-900' : 'text-gray-500'}`}>
+                        {p.title}
+                      </h3>
+                      <p className="text-[10px] text-gray-400 font-medium">
+                        {p.date.toLocaleDateString('fr-FR')}
+                      </p>
+                    </div>
+                  </div>
+                  <p className={`text-xs ${status === 'current' ? 'text-gray-600' : 'text-gray-400'}`}>
+                    {p.desc}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {groups.map(group => (
