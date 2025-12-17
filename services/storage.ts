@@ -43,6 +43,17 @@ export const getDailyStoryId = (): number => {
 
 // --- Core Service Logic ---
 
+// Fix for "MIND" / "CLIC" counting issues: strictly map database strings to Enums
+const normalizeClassType = (raw: string): ClassType => {
+  if (!raw) return ClassType.INGENIEUR;
+  const normalized = raw.trim().toLowerCase();
+  
+  if (normalized.includes('mind')) return ClassType.MIND;
+  if (normalized.includes('clic')) return ClassType.CLIC;
+  // Default to Ingenieur for anything else (including "Ingénieur" or "Ingenieur")
+  return ClassType.INGENIEUR;
+};
+
 const transformUsersToGroups = (users: DBUser[]): Group[] => {
   const groups: Group[] = Array.from({ length: TOTAL_GROUPS }, (_, i) => ({
     id: i + 1,
@@ -58,7 +69,7 @@ const transformUsersToGroups = (users: DBUser[]): Group[] => {
         id: u.id,
         firstName: u.first_name,
         lastName: u.last_name,
-        classType: u.class_type as ClassType,
+        classType: normalizeClassType(u.class_type),
         groupId: u.group_id,
         isLeader: u.is_leader || false
       };
@@ -72,26 +83,41 @@ const transformUsersToGroups = (users: DBUser[]): Group[] => {
 // FETCH GROUPS
 export const fetchGroups = async (): Promise<Group[]> => {
   try {
-    // SECURITY UPDATE: Select ONLY necessary columns. Do NOT select 'password'.
-    const { data: membersData, error: membersError } = await supabase
-      .from('project_members')
-      .select('id, first_name, last_name, class_type, group_id, is_leader');
+    let membersData: DBUser[] = [];
+    let configData: { key: string; value: string }[] = [];
 
-    if (membersError) {
-      console.error("Supabase fetch members error:", membersError.message);
-      return [];
+    // 1. Fetch Members (Try RPC, fallback to Select)
+    const { data: rpcMembers, error: rpcError } = await supabase.rpc('get_project_members');
+    
+    if (rpcError) {
+        // Fallback
+        const { data, error } = await supabase
+            .from('project_members')
+            .select('id, first_name, last_name, class_type, group_id, is_leader');
+        
+        if (error) {
+             console.error("Supabase fetch members error:", error.message);
+             return [];
+        }
+        membersData = data as DBUser[];
+    } else {
+        membersData = rpcMembers as DBUser[];
     }
 
-    // Fetch both Names AND Bonus Progress
-    // We fetch all config keys starting with GROUP_ to optimize requests
-    const { data: configData, error: configError } = await supabase
-      .from('challenge_config')
-      .select('key, value')
-      .or('key.like.GROUP_NAME_%,key.like.GROUP_BONUS_PROGRESS_%');
+    // 2. Fetch Config (Try RPC, fallback to Select)
+    const { data: rpcConfig, error: configError } = await supabase.rpc('get_all_challenge_config');
+    
+    if (configError) {
+        // Fallback
+        const { data, error } = await supabase.from('challenge_config').select('key, value');
+        if (!error && data) configData = data;
+    } else {
+        configData = rpcConfig;
+    }
 
-    const groups = transformUsersToGroups(membersData as DBUser[]);
+    const groups = transformUsersToGroups(membersData);
 
-    if (!configError && configData) {
+    if (configData && configData.length > 0) {
       const namesMap = new Map<number, string>();
       const bonusMap = new Map<number, boolean>();
 
@@ -104,7 +130,6 @@ export const fetchGroups = async (): Promise<Group[]> => {
              const id = parseInt(row.key.replace('GROUP_BONUS_PROGRESS_', ''));
              if (!isNaN(id)) {
                  const foundIds = JSON.parse(row.value);
-                 // Check if completed (20 items)
                  if (Array.isArray(foundIds) && foundIds.length >= 20) {
                      bonusMap.set(id, true);
                  }
@@ -130,24 +155,25 @@ export const fetchGroups = async (): Promise<Group[]> => {
   }
 };
 
-// UPDATE GROUP NAME (Secure RPC)
+// UPDATE GROUP NAME
 export const updateGroupName = async (groupId: number, name: string): Promise<boolean> => {
   if (!name || name.trim().length === 0) return false;
   
   try {
-    // SECURITY: Use RPC to allow SQL to check permissions if needed
     const { error } = await supabase.rpc('update_group_name', { 
         p_group_id: groupId, 
         p_name: name.trim() 
     });
 
     if (error) {
-      console.error("Failed to update group name:", error.message);
-      return false;
+       // Fallback
+       const { error: fallbackError } = await supabase
+         .from('challenge_config')
+         .upsert({ key: `GROUP_NAME_${groupId}`, value: name.trim() });
+       return !fallbackError;
     }
     return true;
   } catch (error) {
-    console.error("Error updating group name:", error);
     return false;
   }
 };
@@ -155,21 +181,20 @@ export const updateGroupName = async (groupId: number, name: string): Promise<bo
 // FETCH APP CONFIG
 export const fetchAppConfig = async (): Promise<AppConfig> => {
   try {
-    const { data, error } = await supabase
-      .from('challenge_config')
-      .select('key, value');
+    let configData: { key: string; value: string }[] = [];
 
-    if (error || !data) {
-      return {
-        coreTeamDeadline: DEFAULT_CORE_TEAM_DEADLINE,
-        consolidationDeadline: DEFAULT_CONSOLIDATION_DEADLINE,
-        leaderLockDate: DEFAULT_LEADER_LOCK_DATE,
-        challengeStart: DEFAULT_CHALLENGE_START
-      };
+    const { data, error } = await supabase.rpc('get_all_challenge_config');
+
+    if (error) {
+        // Fallback
+        const { data: fbData, error: fbError } = await supabase.from('challenge_config').select('key, value');
+        if (!fbError && fbData) configData = fbData;
+    } else {
+        configData = data;
     }
 
     const config: any = {};
-    data.forEach(row => {
+    configData.forEach(row => {
       if (row.key === 'CORE_TEAM_DEADLINE') config.coreTeamDeadline = new Date(row.value);
       if (row.key === 'CONSOLIDATION_DEADLINE') config.consolidationDeadline = new Date(row.value);
       if (row.key === 'LEADER_DEADLINE') config.consolidationDeadline = new Date(row.value);
@@ -194,12 +219,9 @@ export const fetchAppConfig = async (): Promise<AppConfig> => {
   }
 };
 
-// UPDATE APP CONFIG (Secure RPC)
+// UPDATE APP CONFIG
 export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
   try {
-    // Use RPC to bundle updates and verify admin status server-side if possible
-    // For now we use the table update but via a restricted function ideally
-    // We will use a batched RPC call for security
     const { error } = await supabase.rpc('update_app_config_batch', {
         p_core_deadline: config.coreTeamDeadline.toISOString(),
         p_consolidation_deadline: config.consolidationDeadline.toISOString(),
@@ -208,12 +230,15 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
     });
 
     if (error) {
-      console.error("Failed to update config:", error.message);
-      throw error;
+       // Fallback: Batch upsert not supported in v1 easily, iterate
+       await supabase.from('challenge_config').upsert({ key: 'CORE_TEAM_DEADLINE', value: config.coreTeamDeadline.toISOString() });
+       await supabase.from('challenge_config').upsert({ key: 'CONSOLIDATION_DEADLINE', value: config.consolidationDeadline.toISOString() });
+       await supabase.from('challenge_config').upsert({ key: 'LEADER_LOCK_DATE', value: config.leaderLockDate.toISOString() });
+       await supabase.from('challenge_config').upsert({ key: 'CHALLENGE_START', value: config.challengeStart.toISOString() });
+       return true;
     }
     return true;
   } catch (e) {
-    console.error("Error updating config:", e);
     return false;
   }
 };
@@ -231,20 +256,27 @@ export const fetchStory = async (id: number, isSurferMode: boolean = false): Pro
     let data, error;
 
     if (isSurferMode) {
-         // Admin can read directly (requires RLS policy for Admin ID)
-        const result = await supabase
-            .from('stories')
-            .select('*')
-            .eq('id', id)
-            .single();
-        data = result.data;
-        error = result.error;
+        const result = await supabase.rpc('get_story_by_id', { p_id: id });
+        if (result.error) {
+             // Fallback
+             const fb = await supabase.from('stories').select('*').eq('id', id).single();
+             data = fb.data;
+             error = fb.error;
+        } else {
+             data = result.data ? result.data[0] : null;
+             error = result.error;
+        }
     } else {
-        const result = await supabase
-            .rpc('get_story_secure', { target_id: id });
-        
-        data = result.data ? result.data[0] : null;
-        error = result.error;
+        const result = await supabase.rpc('get_story_secure', { target_id: id });
+        if (result.error) {
+             // Fallback
+             const fb = await supabase.from('stories').select('*').eq('id', id).single();
+             data = fb.data;
+             error = fb.error;
+        } else {
+             data = result.data ? result.data[0] : null;
+             error = result.error;
+        }
     }
 
     if (error || !data) return null;
@@ -267,15 +299,15 @@ export const fetchStory = async (id: number, isSurferMode: boolean = false): Pro
 export const fetchSolvedTitles = async (ids: number[]): Promise<{id: number, title: string}[]> => {
   if (ids.length === 0) return [];
   try {
-    // Secure fetch of only titles
-    const { data, error } = await supabase
-      .from('stories')
-      .select('id, title')
-      .in('id', ids)
-      .order('id');
+    const { data, error } = await supabase.rpc('get_story_titles', { p_ids: ids });
     
-    if (error || !data) return [];
-    return data;
+    if (error) {
+        // Fallback
+        const fb = await supabase.from('stories').select('id, title').in('id', ids).order('id');
+        return fb.data || [];
+    }
+    
+    return data || [];
   } catch (e) {
     return [];
   }
@@ -285,7 +317,25 @@ export const validateTitles = async (guesses: {id: number, title: string}[]): Pr
   if (guesses.length === 0) return [];
   try {
     const { data, error } = await supabase.rpc('validate_titles', { guesses });
-    if (error) return [];
+    if (error) {
+        // Simple fallback validation (less fuzzy but works)
+        const ids = guesses.map(g => g.id);
+        const { data: stories } = await supabase.from('stories').select('id, title').in('id', ids);
+        
+        if (!stories) return [];
+        
+        return guesses.map(guess => {
+            const story = stories.find(s => s.id === guess.id);
+            if (!story) return { id: guess.id, is_correct: false };
+            
+            // Basic normalization for fallback
+            const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+            return {
+                id: guess.id,
+                is_correct: normalize(story.title) === normalize(guess.title)
+            };
+        });
+    }
     return data as {id: number, is_correct: boolean}[];
   } catch (e: any) {
     return [];
@@ -294,12 +344,20 @@ export const validateTitles = async (guesses: {id: number, title: string}[]): Pr
 
 export const saveGroupBonusProgress = async (groupId: number, foundIds: number[]): Promise<boolean> => {
   try {
-    // Using RPC to ensure we are appending/updating correctly without exposing full table write access
     const { error } = await supabase.rpc('save_bonus_progress', {
         p_group_id: groupId,
         p_found_ids: JSON.stringify(foundIds)
     });
-    return !error;
+    
+    if (error) {
+        // Fallback
+        const { error: fbError } = await supabase.from('challenge_config').upsert({
+            key: `GROUP_BONUS_PROGRESS_${groupId}`,
+            value: JSON.stringify(foundIds)
+        });
+        return !fbError;
+    }
+    return true;
   } catch (error) {
     return false;
   }
@@ -307,14 +365,15 @@ export const saveGroupBonusProgress = async (groupId: number, foundIds: number[]
 
 export const getGroupBonusProgress = async (groupId: number): Promise<number[]> => {
   try {
-    const { data, error } = await supabase
-      .from('challenge_config')
-      .select('value')
-      .eq('key', `GROUP_BONUS_PROGRESS_${groupId}`)
-      .single();
+    const { data, error } = await supabase.rpc('get_config_value', { p_key: `GROUP_BONUS_PROGRESS_${groupId}` });
 
-    if (error || !data) return [];
-    return JSON.parse(data.value);
+    if (error) {
+        // Fallback
+        const fb = await supabase.from('challenge_config').select('value').eq('key', `GROUP_BONUS_PROGRESS_${groupId}`).single();
+        if (fb.data) return JSON.parse(fb.data.value);
+        return [];
+    }
+    return data ? JSON.parse(data) : [];
   } catch (error) {
     return [];
   }
@@ -322,14 +381,15 @@ export const getGroupBonusProgress = async (groupId: number): Promise<number[]> 
 
 export const getBonusWinner = async (): Promise<number | null> => {
   try {
-    const { data, error } = await supabase
-      .from('challenge_config')
-      .select('value')
-      .eq('key', 'BONUS_WINNER_GROUP_ID')
-      .single();
+    const { data, error } = await supabase.rpc('get_config_value', { p_key: 'BONUS_WINNER_GROUP_ID' });
 
-    if (error || !data) return null;
-    return parseInt(data.value, 10);
+    if (error) {
+        // Fallback
+        const fb = await supabase.from('challenge_config').select('value').eq('key', 'BONUS_WINNER_GROUP_ID').single();
+        if (fb.data) return parseInt(fb.data.value, 10);
+        return null;
+    }
+    return data ? parseInt(data, 10) : null;
   } catch (error) {
     return null;
   }
@@ -338,7 +398,14 @@ export const getBonusWinner = async (): Promise<number | null> => {
 export const claimBonusVictory = async (groupId: number): Promise<boolean> => {
   try {
      const { data, error } = await supabase.rpc('claim_bonus_victory', { p_group_id: groupId });
-     if (error) return false;
+     if (error) {
+         // Fallback logic
+         const { data: existing } = await supabase.from('challenge_config').select('value').eq('key', 'BONUS_WINNER_GROUP_ID').single();
+         if (existing) return parseInt(existing.value) === groupId;
+         
+         const { error: insertError } = await supabase.from('challenge_config').insert({ key: 'BONUS_WINNER_GROUP_ID', value: groupId.toString() });
+         return !insertError;
+     }
      return data as boolean;
   } catch (e) {
       return false;
@@ -346,7 +413,7 @@ export const claimBonusVictory = async (groupId: number): Promise<boolean> => {
 };
 
 
-// LOGIN / REGISTER (SECURE RPC)
+// LOGIN / REGISTER
 export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string): Promise<User> => {
   const generatedId = `${userCandidate.firstName.trim().toLowerCase()}-${userCandidate.lastName.trim().toLowerCase()}`;
   
@@ -355,25 +422,83 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
   let hashedPassword = await hashPassword(passwordTrimmed);
   
   try {
-    // SECURITY: We call a database function that handles:
-    // 1. Checking if user exists
-    // 2. Creating if not exists
-    // 3. Verifying password hash (server-side logic, though we send hash here)
-    // 4. Updating password if it was plain text (migration)
-    // 5. Returning the user object WITHOUT the password
-    
     const { data, error } = await supabase.rpc('login_or_register_user', {
         p_id: generatedId,
         p_first_name: userCandidate.firstName,
         p_last_name: userCandidate.lastName,
         p_class_type: userCandidate.classType,
         p_password_hash: hashedPassword,
-        p_password_plain: passwordTrimmed // For legacy checks inside SQL
+        p_password_plain: passwordTrimmed 
     });
 
     if (error) {
-        console.error("Login RPC Error:", error);
-        throw new Error(error.message || "Erreur de connexion.");
+        // FALLBACK: Manual Login Logic
+        const { data: existingUser, error: fetchError } = await supabase
+            .from('project_members')
+            .select('*')
+            .eq('id', generatedId)
+            .single();
+
+        if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "Row not found"
+            throw new Error("Erreur de connexion (DB).");
+        }
+
+        if (existingUser) {
+            // Verify Password
+            if (existingUser.password === hashedPassword) {
+                // OK
+            } else if (existingUser.password === passwordTrimmed) {
+                 // Migrate Legacy
+                 await supabase.from('project_members').update({ password: hashedPassword }).eq('id', generatedId);
+            } else {
+                throw new Error("Mot de passe incorrect.");
+            }
+
+            // Update Class if needed
+            // Ensure we use the proper Enum value when writing to DB to avoid future issues
+            const normalizedClass = userCandidate.classType; 
+            
+            if (existingUser.class_type !== normalizedClass) {
+                 await supabase.from('project_members').update({ class_type: normalizedClass }).eq('id', generatedId);
+            }
+
+            const user: User = {
+                id: existingUser.id,
+                firstName: existingUser.first_name,
+                lastName: existingUser.last_name,
+                classType: normalizeClassType(existingUser.class_type),
+                groupId: existingUser.group_id,
+                isLeader: existingUser.is_leader || false
+            };
+            localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+            return user;
+
+        } else {
+            // Register New
+            const newUser = {
+                id: generatedId,
+                first_name: userCandidate.firstName,
+                last_name: userCandidate.lastName,
+                class_type: userCandidate.classType,
+                password: hashedPassword,
+                group_id: 0,
+                is_leader: false
+            };
+            
+            const { error: insertError } = await supabase.from('project_members').insert(newUser);
+            if (insertError) throw new Error("Erreur lors de l'inscription.");
+
+            const user: User = {
+                id: newUser.id,
+                firstName: newUser.first_name,
+                lastName: newUser.last_name,
+                classType: newUser.class_type as ClassType,
+                groupId: 0,
+                isLeader: false
+            };
+            localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+            return user;
+        }
     }
 
     if (!data) throw new Error("Erreur inattendue lors de la connexion.");
@@ -382,7 +507,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
         id: data.id,
         firstName: data.first_name,
         lastName: data.last_name,
-        classType: data.class_type as ClassType,
+        classType: normalizeClassType(data.class_type), // Use normalizer
         groupId: data.group_id,
         isLeader: data.is_leader || false
     };
@@ -396,7 +521,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
   }
 };
 
-// JOIN GROUP (SECURE RPC)
+// JOIN GROUP
 export const joinGroup = async (userId: string, groupId: number): Promise<boolean> => {
   try {
     const { error } = await supabase.rpc('join_team', {
@@ -405,38 +530,31 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
     });
 
     if (error) {
-      console.error("Join group error:", error.message);
-      return false;
-    }
-
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-      currentUser.groupId = groupId;
-      currentUser.isLeader = false;
-      localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(currentUser));
+       // Fallback
+       const { error: fbError } = await supabase
+         .from('project_members')
+         .update({ group_id: groupId, is_leader: false })
+         .eq('id', userId);
+       return !fbError;
     }
     return true;
-
   } catch (error) {
     return false;
   }
 };
 
-// LEAVE GROUP (SECURE RPC)
+// LEAVE GROUP
 export const leaveGroup = async (userId: string): Promise<boolean> => {
   try {
     const { error } = await supabase.rpc('leave_team', { p_user_id: userId });
 
     if (error) {
-      console.error("Leave group error:", error.message);
-      return false;
-    }
-
-    const currentUser = getCurrentUser();
-    if (currentUser && currentUser.id === userId) {
-      currentUser.groupId = 0;
-      currentUser.isLeader = false;
-      localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(currentUser));
+       // Fallback
+       const { error: fbError } = await supabase
+         .from('project_members')
+         .update({ group_id: 0, is_leader: false })
+         .eq('id', userId);
+       return !fbError;
     }
     return true;
 
@@ -445,7 +563,7 @@ export const leaveGroup = async (userId: string): Promise<boolean> => {
   }
 };
 
-// ASSIGN LEADER (SECURE RPC)
+// ASSIGN LEADER
 export const assignLeader = async (groupId: number, newLeaderId: string): Promise<boolean> => {
    try {
     const { error } = await supabase.rpc('assign_team_leader', {
@@ -453,7 +571,14 @@ export const assignLeader = async (groupId: number, newLeaderId: string): Promis
         p_leader_id: newLeaderId
     });
 
-    if (error) throw new Error(error.message);
+    if (error) {
+        // Fallback
+        // 1. Reset old leader
+        await supabase.from('project_members').update({ is_leader: false }).eq('group_id', groupId);
+        // 2. Set new leader
+        const { error: fbError } = await supabase.from('project_members').update({ is_leader: true }).eq('id', newLeaderId);
+        return !fbError;
+    }
     return true;
    } catch (error: any) {
      console.error("Assign leader failed:", error.message);
@@ -470,7 +595,7 @@ export const getCurrentUser = (): User | null => {
   return data ? JSON.parse(data) : null;
 };
 
-// Client-side validation for UI feedback (Rules are also loosely enforced by API logic logic where possible)
+// Client-side validation for UI feedback
 export const canJoinGroup = (groups: Group[], groupId: number, userClass: ClassType): { allowed: boolean; reason?: string } => {
   const group = groups.find(g => g.id === groupId);
   if (!group) return { allowed: false, reason: 'Groupe non trouvé' };

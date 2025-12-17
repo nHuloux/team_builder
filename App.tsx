@@ -486,7 +486,9 @@ function App() {
       }
   };
 
-  const isAdmin = currentUser?.firstName === 'Nicolas' && currentUser?.lastName === 'Huloux';
+  // Improved Admin Check: Case insensitive and whitespace safe
+  const isAdmin = (currentUser?.firstName || '').trim().toLowerCase() === 'nicolas' && 
+                  (currentUser?.lastName || '').trim().toLowerCase() === 'huloux';
 
   const userGroup = groups.find(g => g.id === currentUser?.groupId);
   const currentGroupName = userGroup?.name || "QG";
