@@ -34,6 +34,19 @@ const hashPassword = async (password: string): Promise<string> => {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+// Centralized Date Logic for Story ID
+export const getDailyStoryId = (): number => {
+    const today = new Date();
+    const startOfYear = new Date(today.getFullYear(), 0, 0);
+    const diff = today.getTime() - startOfYear.getTime();
+    const oneDay = 1000 * 60 * 60 * 24;
+    const dayOfYear = Math.floor(diff / oneDay);
+    
+    const TOTAL_DB_STORIES = 20;
+    // Sequential loop 1-20
+    return (dayOfYear % TOTAL_DB_STORIES) + 1;
+};
+
 // --- Core Service Logic ---
 
 // Transform DB users into Groups
@@ -206,19 +219,52 @@ export const updateAppConfig = async (config: AppConfig): Promise<boolean> => {
 
 // --- BONUS / STORY GAME SERVICES ---
 
-// Fetch specific story of the day
-export const fetchStory = async (id: number): Promise<Story | null> => {
+/**
+ * Fetch specific story of the day.
+ * SECURED: Logic prevents mass scraping by validating ID against date.
+ * SQL REQUIREMENT FOR TRUE SECURITY:
+ * Create RPC: 
+ * CREATE FUNCTION get_story_secure(target_id int) RETURNS SETOF stories AS $$
+ * BEGIN RETURN QUERY SELECT * FROM stories WHERE id = target_id; END; $$ LANGUAGE plpgsql;
+ * And REVOKE SELECT on 'stories' from anon/authenticated.
+ */
+export const fetchStory = async (id: number, isSurferMode: boolean = false): Promise<Story | null> => {
   try {
-    const { data, error } = await supabase
-      .from('stories')
-      .select('*')
-      .eq('id', id)
-      .single();
-    
-    if (error || !data) return null;
+    // 1. Client-Side Security Check
+    // Prevents simple loop scraping in console
+    const authorizedId = getDailyStoryId();
+    if (!isSurferMode && id !== authorizedId) {
+        console.warn(`SECURITY ALERT: Attempt to access unauthorized story #${id}. Access denied.`);
+        return null;
+    }
 
-    const row = data as DBStory;
+    // 2. Server-Side Fetch (Priority: RPC, Fallback: Select)
+    // We try to use a secure RPC if it exists (allows user to implement SQL security later)
+    const { data: rpcData, error: rpcError } = await supabase
+        .rpc('get_story_secure', { target_id: id });
     
+    let data = rpcData;
+    let error = rpcError;
+
+    // Fallback to standard Select if RPC doesn't exist yet (backward compatibility)
+    if (rpcError && (rpcError.code === '42883' || rpcError.message.includes('function'))) {
+         const { data: selectData, error: selectError } = await supabase
+            .from('stories')
+            .select('*')
+            .eq('id', id)
+            .single();
+         data = selectData;
+         error = selectError;
+    }
+
+    if (error || !data) {
+        if (error) console.error("Error fetching story:", error.message);
+        return null;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data; // RPC returns array, .single() returns object
+    if (!row) return null;
+
     return {
       id: row.id,
       title: row.title,
@@ -254,20 +300,52 @@ export const fetchSolvedTitles = async (ids: number[]): Promise<{id: number, tit
 };
 
 // NEW: Server-side validation via RPC to avoid leaking answers
+// UPDATED: Now includes fallback to client-side validation if RPC is missing
 export const validateTitles = async (guesses: {id: number, title: string}[]): Promise<{id: number, is_correct: boolean}[]> => {
   if (guesses.length === 0) return [];
+  
+  // 1. Try Secure RPC
   try {
-    // Requires CREATE FUNCTION validate_titles(guesses jsonb) in Supabase
     const { data, error } = await supabase
       .rpc('validate_titles', { guesses });
 
+    if (!error && data) {
+        return data as {id: number, is_correct: boolean}[];
+    }
+    
+    // Log RPC error but proceed to fallback
     if (error) {
-        console.error("RPC Validation error:", error);
+         console.warn("RPC 'validate_titles' failed (likely not created in DB).", error.message);
+    }
+  } catch (e: any) {
+    console.warn("RPC call exception:", e.message);
+  }
+
+  // 2. Fallback: Client-side validation (If RPC missing)
+  // WARNING: This exposes titles in the network response, but allows the app to work without the SQL function.
+  try {
+    const ids = guesses.map(g => g.id);
+    const { data, error } = await supabase
+      .from('stories')
+      .select('id, title')
+      .in('id', ids);
+    
+    if (error || !data) {
+        console.error("Fallback validation failed:", error?.message);
         return [];
     }
-    return data as {id: number, is_correct: boolean}[];
+    
+    // Normalize and compare
+    return guesses.map(g => {
+        const correctTitle = data.find(t => t.id === g.id)?.title;
+        const isCorrect = correctTitle 
+            ? correctTitle.trim().toLowerCase() === g.title.trim().toLowerCase()
+            : false;
+        return { id: g.id, is_correct: isCorrect };
+    });
+
   } catch (e) {
-    console.error("Error validating titles:", e);
+    console.error("Error validating titles (Fallback):", e);
     return [];
   }
 };
@@ -506,7 +584,8 @@ export const leaveGroup = async (userId: string): Promise<boolean> => {
     }
 
     const currentUser = getCurrentUser();
-    if (currentUser) {
+    // CRITICAL FIX: Only update local storage if the user leaving IS the current user
+    if (currentUser && currentUser.id === userId) {
       currentUser.groupId = 0; // Set to 0 to indicate no group
       currentUser.isLeader = false; // Reset leader when leaving
       localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(currentUser));

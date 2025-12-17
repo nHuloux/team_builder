@@ -1,51 +1,54 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, BookOpen, ChevronRight, Binary, ScanEye, Save, Loader2 } from 'lucide-react';
+import { X, BookOpen, ChevronRight, Binary, ScanEye, Save, Loader2, ChevronLeft, Timer } from 'lucide-react';
 import { Button } from './Button';
 import { Member, Story, StoryOption } from '../types';
-import { fetchStory } from '../services/storage';
+import { fetchStory, getDailyStoryId } from '../services/storage';
 
 interface MiniGameProps {
   isOpen: boolean;
   onClose: () => void;
   groupName?: string;
   members: Member[];
+  isSurferMode?: boolean;
 }
 
-export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName = "Mon Équipe", members }) => {
+export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName = "Mon Équipe", members, isSurferMode = false }) => {
   const [currentStory, setCurrentStory] = useState<Story | null>(null);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'intro' | 'result'>('intro');
   const [resultText, setResultText] = useState("");
   const [shuffledMembers, setShuffledMembers] = useState<string[]>([]);
+  const [storyIdToLoad, setStoryIdToLoad] = useState<number | null>(null);
   
+  // Reading Timer State
+  const [canVote, setCanVote] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(3);
+
   // Decryption State
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedId, setDecryptedId] = useState<number | null>(null);
   const [displayId, setDisplayId] = useState("00");
 
-  // 1. Determine Story of the Day based on Date
+  // 1. Determine Story of the Day based on Date (Centralized logic)
   useEffect(() => {
     if (isOpen) {
-      loadDailyStory();
+      const dailyId = getDailyStoryId();
+      setStoryIdToLoad(dailyId);
     }
   }, [isOpen]);
 
-  const loadDailyStory = async () => {
+  // Fetch story when ID changes
+  useEffect(() => {
+    if (storyIdToLoad !== null) {
+        loadStory(storyIdToLoad);
+    }
+  }, [storyIdToLoad]);
+
+  const loadStory = async (id: number) => {
     setLoading(true);
-    // Calculate Story ID
-    const today = new Date();
-    const startOfYear = new Date(today.getFullYear(), 0, 0);
-    const diff = today.getTime() - startOfYear.getTime();
-    const oneDay = 1000 * 60 * 60 * 24;
-    const dayOfYear = Math.floor(diff / oneDay);
-    
-    // We assume 20 stories in DB. IDs are 1-20.
-    // Modulo logic: day 0 -> index 0 -> ID 1
-    const TOTAL_DB_STORIES = 20;
-    const storyId = (dayOfYear % TOTAL_DB_STORIES) + 1;
-    
-    const story = await fetchStory(storyId);
+    // Security: Pass isSurferMode to bypass strict date checks if admin
+    const story = await fetchStory(id, isSurferMode);
     
     if (story) {
         setCurrentStory(story);
@@ -54,12 +57,33 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
         setDecryptedId(null);
         setIsDecrypting(false);
         setDisplayId("00");
+        
+        // Reset and Start Reading Timer
+        setCanVote(false);
+        setTimeLeft(3);
     } else {
-        // Fallback or error handling
-        console.error("Could not fetch story for ID", storyId);
+        console.error("Could not fetch story for ID", id);
+        if (!isSurferMode) {
+             // If access denied securely
+             alert("Accès refusé. Vous tentez d'accéder à une histoire qui n'est pas celle du jour.");
+             onClose();
+        }
     }
     setLoading(false);
   };
+
+  // Reading Timer Logic
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    if (step === 'intro' && currentStory && !loading && timeLeft > 0) {
+        interval = setInterval(() => {
+            setTimeLeft((prev) => prev - 1);
+        }, 1000);
+    } else if (timeLeft === 0) {
+        setCanVote(true);
+    }
+    return () => { if(interval) clearInterval(interval); };
+  }, [timeLeft, step, currentStory, loading]);
 
   const prepareMembers = () => {
       // Shuffle members for random role assignment
@@ -112,12 +136,21 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
   };
 
   const handleChoice = (option: StoryOption) => {
+    if (!canVote) return;
     setResultText(formatText(option.outcome));
     setStep('result');
   };
 
   const startDecryption = () => {
     setIsDecrypting(true);
+  };
+
+  const handleSurferNav = (direction: 'prev' | 'next') => {
+    if (storyIdToLoad === null) return;
+    let newId = direction === 'next' ? storyIdToLoad + 1 : storyIdToLoad - 1;
+    if (newId > 20) newId = 1;
+    if (newId < 1) newId = 20;
+    setStoryIdToLoad(newId);
   };
 
   if (!isOpen) return null;
@@ -136,12 +169,39 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
             </button>
             <BookOpen className="w-10 h-10 mx-auto mb-2 opacity-90" />
             <h2 className="text-xl font-bold tracking-tight">L'Histoire du Jour</h2>
-            <p className="text-indigo-200 text-sm mt-1">{groupName} • {new Date().toLocaleDateString('fr-FR')}</p>
+            <p className="text-indigo-200 text-sm mt-1 flex items-center justify-center gap-2">
+                {groupName} • {new Date().toLocaleDateString('fr-FR')}
+                {isSurferMode && storyIdToLoad && (
+                    <span className="bg-indigo-800 text-xs px-2 py-0.5 rounded text-indigo-200 border border-indigo-400/50">
+                        ID: {storyIdToLoad}
+                    </span>
+                )}
+            </p>
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-8 flex flex-col justify-center items-center text-center">
+        <div className="flex-1 p-8 flex flex-col justify-center items-center text-center relative">
             
+            {/* Surfer Mode Navigation Arrows */}
+            {isSurferMode && (
+                <>
+                    <button 
+                        onClick={() => handleSurferNav('prev')}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-2 text-gray-300 hover:text-indigo-600 transition-colors"
+                        title="Histoire précédente (Mode Surfer)"
+                    >
+                        <ChevronLeft className="w-8 h-8" />
+                    </button>
+                    <button 
+                        onClick={() => handleSurferNav('next')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-300 hover:text-indigo-600 transition-colors"
+                        title="Histoire suivante (Mode Surfer)"
+                    >
+                        <ChevronRight className="w-8 h-8" />
+                    </button>
+                </>
+            )}
+
             {loading || !currentStory ? (
                 <div className="flex flex-col items-center gap-4 text-gray-500">
                     <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
@@ -149,30 +209,45 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
                 </div>
             ) : (
                 <>
-                    <h3 className="text-2xl font-bold text-gray-800 mb-6 leading-tight">
+                    <h3 className="text-2xl font-bold text-gray-800 mb-6 leading-tight px-8">
                         {currentStory.title}
                     </h3>
 
                     {step === 'intro' ? (
-                        <div className="space-y-8 animate-in slide-in-from-right duration-300">
+                        <div className="space-y-8 animate-in slide-in-from-right duration-300 w-full">
                             <p className="text-lg text-gray-600 leading-relaxed">
                                 {formatText(currentStory.intro)}
                             </p>
                             
+                            {/* Reading Timer Indicator */}
+                            {!canVote && (
+                                <div className="flex justify-center items-center gap-2 text-orange-500 text-sm font-medium animate-pulse">
+                                    <Timer className="w-4 h-4" />
+                                    Lecture en cours... ({timeLeft}s)
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-1 gap-4 w-full">
                                 {currentStory.options.map((opt, idx) => (
                                     <button
                                         key={idx}
                                         onClick={() => handleChoice(opt)}
-                                        className="group relative w-full bg-gray-50 hover:bg-indigo-50 border-2 border-gray-200 hover:border-indigo-200 p-4 rounded-xl transition-all duration-200 text-left flex items-center gap-4 hover:shadow-md"
+                                        disabled={!canVote}
+                                        className={`
+                                            group relative w-full border-2 p-4 rounded-xl transition-all duration-200 text-left flex items-center gap-4
+                                            ${!canVote 
+                                                ? 'bg-gray-100 border-gray-100 text-gray-400 cursor-not-allowed grayscale' 
+                                                : 'bg-gray-50 hover:bg-indigo-50 border-gray-200 hover:border-indigo-200 hover:shadow-md cursor-pointer'
+                                            }
+                                        `}
                                     >
-                                        <span className="text-3xl group-hover:scale-110 transition-transform duration-200 block">
+                                        <span className={`text-3xl block transition-transform duration-200 ${canVote ? 'group-hover:scale-110' : ''}`}>
                                             {opt.emoji}
                                         </span>
-                                        <span className="font-semibold text-gray-700 group-hover:text-indigo-700">
+                                        <span className={`font-semibold ${canVote ? 'text-gray-700 group-hover:text-indigo-700' : ''}`}>
                                             {opt.text}
                                         </span>
-                                        <ChevronRight className="w-5 h-5 text-gray-300 ml-auto group-hover:text-indigo-400" />
+                                        {canVote && <ChevronRight className="w-5 h-5 text-gray-300 ml-auto group-hover:text-indigo-400" />}
                                     </button>
                                 ))}
                             </div>
@@ -225,9 +300,16 @@ export const MiniGame: React.FC<MiniGameProps> = ({ isOpen, onClose, groupName =
                                 </div>
                             )}
 
-                            <Button onClick={onClose} className="w-full py-3 text-lg mt-2" variant="secondary">
-                                Fermer le livre
-                            </Button>
+                            <div className="flex gap-2 w-full">
+                                <Button onClick={onClose} className="flex-1 py-3 text-lg mt-2" variant="secondary">
+                                    Fermer le livre
+                                </Button>
+                                {isSurferMode && (
+                                    <Button onClick={() => setStep('intro')} className="mt-2" variant="outline" title="Rejouer cette histoire">
+                                        Rejouer
+                                    </Button>
+                                )}
+                            </div>
                         </div>
                     )}
                 </>

@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Group, User, ClassType, QUOTAS } from '../types';
 import { Button } from './Button';
 import { canJoinGroup } from '../services/storage';
-import { Users, Crown, Edit2, Check, X, LogOut } from 'lucide-react';
+import { Users, Crown, Edit2, Check, X, LogOut, UserMinus } from 'lucide-react';
 
 interface GroupCardProps {
   group: Group;
@@ -13,9 +13,11 @@ interface GroupCardProps {
   onLeave: (groupId: number) => void;
   onAssignLeader: (groupId: number, memberId: string) => void;
   onRename: (groupId: number, newName: string) => void;
+  onRemoveMember?: (memberId: string, groupId: number) => void;
   groupLockDate: Date;
   leaderLockDate: Date;
   isSurferMode?: boolean;
+  isAdmin?: boolean;
   onOpenGame?: () => void;
 }
 
@@ -27,9 +29,11 @@ export const GroupCard: React.FC<GroupCardProps> = ({
   onLeave,
   onAssignLeader,
   onRename,
+  onRemoveMember,
   groupLockDate,
   leaderLockDate,
   isSurferMode = false,
+  isAdmin = false,
   onOpenGame
 }) => {
   const userInGroup = group.members.some(m => m.id === currentUser.id);
@@ -189,6 +193,17 @@ export const GroupCard: React.FC<GroupCardProps> = ({
                             )}
                           </button>
                         )
+                      )}
+
+                      {/* Admin Remove Button */}
+                      {isAdmin && !isMe && onRemoveMember && (
+                          <button 
+                            onClick={() => onRemoveMember(member.id, group.id)}
+                            className="text-red-300 hover:text-red-600 transition-colors p-0.5"
+                            title="Admin: Retirer du groupe"
+                          >
+                             <UserMinus className="h-4 w-4" />
+                          </button>
                       )}
                     </div>
                   </li>

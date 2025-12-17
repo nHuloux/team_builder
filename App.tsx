@@ -407,6 +407,20 @@ function App() {
     setIsActionLoading(false);
   };
 
+  const handleAdminRemoveMember = async (userId: string, groupId: number) => {
+      // Allow admin to remove user regardless of dates/phases
+      // Confirmation removed for faster action
+      
+      setIsActionLoading(true);
+      const success = await leaveGroup(userId);
+      if (success) {
+          await loadData();
+      } else {
+          alert("Erreur lors de la suppression du membre.");
+      }
+      setIsActionLoading(false);
+  };
+
   const handleAssignLeader = async (groupId: number, memberId: string) => {
     if (new Date() > appConfig.leaderLockDate) {
         alert("La date limite pour désigner un chef est dépassée.");
@@ -491,6 +505,7 @@ function App() {
         onClose={() => setIsGameOpen(false)} 
         groupName={currentGroupName}
         members={userGroup?.members || []}
+        isSurferMode={isSurferMode}
       />
 
       <BonusModal 
@@ -585,9 +600,11 @@ function App() {
                 onLeave={handleLeaveGroup}
                 onAssignLeader={handleAssignLeader}
                 onRename={handleRenameGroup}
+                onRemoveMember={handleAdminRemoveMember}
                 groupLockDate={appConfig.consolidationDeadline}
                 leaderLockDate={appConfig.leaderLockDate}
                 isSurferMode={isSurferMode}
+                isAdmin={isAdmin}
                 onOpenGame={() => setIsGameOpen(true)}
               />
             ))}
