@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Group, User, ClassType, QUOTAS } from '../types';
 import { Button } from './Button';
 import { canJoinGroup } from '../services/storage';
-import { Users, Crown, Edit2, Check, X, LogOut, UserMinus } from 'lucide-react';
+import { Users, Crown, Edit2, Check, X, LogOut, UserMinus, PartyPopper } from 'lucide-react';
 
 interface GroupCardProps {
   group: Group;
@@ -101,8 +101,14 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             </div>
           ) : (
             <div className="flex items-center gap-2 max-w-[85%]">
-              <h3 className="text-lg font-bold text-gray-900 truncate" title={group.name}>
+              <h3 className="text-lg font-bold text-gray-900 truncate flex items-center gap-2" title={group.name}>
                 {group.name}
+                {group.bonusCompleted && (
+                    <PartyPopper 
+                        className="w-5 h-5 text-pink-500 animate-bounce" 
+                        title="Codex complété ! L'équipe a trouvé les 20 histoires." 
+                    />
+                )}
               </h3>
               {userInGroup && <span className="inline-flex shrink-0 items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">Vous</span>}
               {/* Allow renaming if user is in group and Phase 2 is done (Groups are locked) */}

@@ -22,6 +22,7 @@ export interface Group {
   id: number;
   name: string;
   members: Member[];
+  bonusCompleted?: boolean; // New property for UI
 }
 
 export interface StoryOption {

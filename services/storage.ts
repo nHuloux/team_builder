@@ -47,7 +47,8 @@ const transformUsersToGroups = (users: DBUser[]): Group[] => {
   const groups: Group[] = Array.from({ length: TOTAL_GROUPS }, (_, i) => ({
     id: i + 1,
     name: `Groupe ${i + 1}`,
-    members: []
+    members: [],
+    bonusCompleted: false
   }));
 
   users.forEach(u => {
@@ -81,20 +82,33 @@ export const fetchGroups = async (): Promise<Group[]> => {
       return [];
     }
 
-    const { data: namesData, error: namesError } = await supabase
+    // Fetch both Names AND Bonus Progress
+    // We fetch all config keys starting with GROUP_ to optimize requests
+    const { data: configData, error: configError } = await supabase
       .from('challenge_config')
       .select('key, value')
-      .like('key', 'GROUP_NAME_%');
+      .or('key.like.GROUP_NAME_%,key.like.GROUP_BONUS_PROGRESS_%');
 
     const groups = transformUsersToGroups(membersData as DBUser[]);
 
-    if (!namesError && namesData) {
+    if (!configError && configData) {
       const namesMap = new Map<number, string>();
-      namesData.forEach(row => {
+      const bonusMap = new Map<number, boolean>();
+
+      configData.forEach(row => {
         try {
-          const id = parseInt(row.key.replace('GROUP_NAME_', ''));
-          if (!isNaN(id)) {
-            namesMap.set(id, row.value);
+          if (row.key.startsWith('GROUP_NAME_')) {
+             const id = parseInt(row.key.replace('GROUP_NAME_', ''));
+             if (!isNaN(id)) namesMap.set(id, row.value);
+          } else if (row.key.startsWith('GROUP_BONUS_PROGRESS_')) {
+             const id = parseInt(row.key.replace('GROUP_BONUS_PROGRESS_', ''));
+             if (!isNaN(id)) {
+                 const foundIds = JSON.parse(row.value);
+                 // Check if completed (20 items)
+                 if (Array.isArray(foundIds) && foundIds.length >= 20) {
+                     bonusMap.set(id, true);
+                 }
+             }
           }
         } catch (e) { }
       });
@@ -102,6 +116,9 @@ export const fetchGroups = async (): Promise<Group[]> => {
       groups.forEach(g => {
         if (namesMap.has(g.id)) {
           g.name = namesMap.get(g.id)!;
+        }
+        if (bonusMap.has(g.id)) {
+          g.bonusCompleted = true;
         }
       });
     }
