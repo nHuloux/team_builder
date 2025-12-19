@@ -31,7 +31,7 @@ export const fetchGroups = async (): Promise<Group[]> => {
     if (mError) throw mError;
 
     const { data: config, error: cError } = await supabase.rpc('get_all_challenge_config');
-    
+
     const groups: Group[] = Array.from({ length: TOTAL_GROUPS }, (_, i) => ({
       id: i + 1,
       name: `Groupe ${i + 1}`,
@@ -73,19 +73,20 @@ export const fetchGroups = async (): Promise<Group[]> => {
 export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string): Promise<User> => {
   const generatedId = `${userCandidate.firstName.trim().toLowerCase()}-${userCandidate.lastName.trim().toLowerCase()}`;
   const hashedPassword = await hashPassword(passwordRaw.trim());
-  
+
   const { data, error } = await supabase.rpc('login_or_register_user', {
     p_id: generatedId,
     p_first_name: userCandidate.firstName.trim(),
     p_last_name: userCandidate.lastName.trim(),
     p_class_type: userCandidate.classType,
-    p_password_hash: hashedPassword,
+    p_password: hashedPassword,
     p_password_plain: passwordRaw.trim()
   });
 
   if (error) {
-      if (error.message.includes('Mot de passe incorrect')) throw new Error('Mot de passe incorrect');
-      throw new Error("Erreur de connexion.");
+    console.error("Login RPC Error:", error);
+    if (error.message.includes('Mot de passe incorrect')) throw new Error('Mot de passe incorrect');
+    throw new Error(`Erreur de connexion: ${error.message} (Hint: Check .env.local and RPC signature)`);
   }
 
   if (!data || data.length === 0) throw new Error("Réponse serveur invalide.");
@@ -98,7 +99,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
     groupId: data[0].group_id,
     isLeader: Boolean(data[0].is_leader)
   };
-  
+
   localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
   return user;
 };
@@ -107,12 +108,12 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
   try {
     const { error } = await supabase.rpc('join_team', { p_user_id: userId, p_group_id: groupId });
     if (!error) {
-        const user = getCurrentUser();
-        if (user) {
-            user.groupId = groupId;
-            user.isLeader = false;
-            localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
-        }
+      const user = getCurrentUser();
+      if (user) {
+        user.groupId = groupId;
+        user.isLeader = false;
+        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+      }
     }
     return !error;
   } catch { return false; }
@@ -122,12 +123,12 @@ export const leaveGroup = async (userId: string): Promise<boolean> => {
   try {
     const { error } = await supabase.rpc('leave_team', { p_user_id: userId });
     if (!error) {
-        const user = getCurrentUser();
-        if (user) {
-            user.groupId = null;
-            user.isLeader = false;
-            localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
-        }
+      const user = getCurrentUser();
+      if (user) {
+        user.groupId = null;
+        user.isLeader = false;
+        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+      }
     }
     return !error;
   } catch { return false; }
@@ -142,9 +143,9 @@ export const updateGroupName = async (groupId: number, name: string): Promise<bo
 
 export const updateGroupManifesto = async (groupId: number, manifesto: string): Promise<boolean> => {
   try {
-    const { error } = await supabase.from('challenge_config').upsert({ 
-        key: `GROUP_MANIFESTO_${groupId}`, 
-        value: manifesto 
+    const { error } = await supabase.from('challenge_config').upsert({
+      key: `GROUP_MANIFESTO_${groupId}`,
+      value: manifesto
     });
     return !error;
   } catch { return false; }
@@ -152,27 +153,27 @@ export const updateGroupManifesto = async (groupId: number, manifesto: string): 
 
 export const assignLeader = async (groupId: number, memberId: string): Promise<boolean> => {
   try {
-    const { data, error } = await supabase.rpc('assign_team_leader', { 
-        p_group_id: groupId, 
-        p_leader_id: memberId 
+    const { data, error } = await supabase.rpc('assign_team_leader', {
+      p_group_id: groupId,
+      p_leader_id: memberId
     });
-    
+
     if (error) {
-        console.error("RPC assign_team_leader error:", error.message);
-        return false;
+      console.error("RPC assign_team_leader error:", error.message);
+      return false;
     }
 
     // Immediately update local storage to reflect the change for the current user
     const user = getCurrentUser();
     if (user && user.groupId === groupId) {
-        user.isLeader = (user.id === memberId);
-        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
+      user.isLeader = (user.id === memberId);
+      localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
     }
-    
+
     return true;
-  } catch (err) { 
+  } catch (err) {
     console.error("assignLeader exception:", err);
-    return false; 
+    return false;
   }
 };
 
@@ -269,7 +270,7 @@ export const claimBonusVictory = async (groupId: number): Promise<boolean> => {
   } catch { return false; }
 };
 
-export const fetchSolvedTitles = async (solvedIds: number[]): Promise<{id: number, title: string}[]> => {
+export const fetchSolvedTitles = async (solvedIds: number[]): Promise<{ id: number, title: string }[]> => {
   if (!solvedIds || solvedIds.length === 0) return [];
   try {
     const { data } = await supabase.from('stories').select('id, title').in('id', solvedIds);
@@ -277,7 +278,7 @@ export const fetchSolvedTitles = async (solvedIds: number[]): Promise<{id: numbe
   } catch { return []; }
 };
 
-export const validateTitles = async (guesses: {id: number, title: string}[]): Promise<{id: number, is_correct: boolean}[]> => {
+export const validateTitles = async (guesses: { id: number, title: string }[]): Promise<{ id: number, is_correct: boolean }[]> => {
   try {
     const { data, error } = await supabase.rpc('validate_story_titles', { p_guesses: guesses });
     if (error) throw error;
