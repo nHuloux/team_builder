@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Group, User, ClassType, QUOTAS } from '../types';
 import { Button } from './Button';
 import { canJoinGroup, updateGroupManifesto } from '../services/storage';
-import { Crown, Edit2, Check, X, LogOut, ShieldCheck, Sparkles, MessageSquare, Trophy, Star, Shield } from 'lucide-react';
+import { Crown, Edit2, Check, X, LogOut, ShieldCheck, Sparkles, MessageSquare, Trophy, Star, Shield, BookOpen } from 'lucide-react';
 
 interface GroupCardProps {
   group: Group;
@@ -185,7 +185,12 @@ export const GroupCard: React.FC<GroupCardProps> = ({
 
         <div className="space-y-3">
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex justify-between items-center">
-            <span>Groupe ({group.members.length})</span>
+            <span className="flex items-center gap-2">
+              Groupe ({group.members.length})
+              {group.bonusCompleted && (
+                <span title="Codex Complété"><BookOpen className="w-4 h-4 text-indigo-500" /></span>
+              )}
+            </span>
 
           </p>
           {group.members.length === 0 ? (

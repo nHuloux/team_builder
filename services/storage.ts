@@ -63,6 +63,17 @@ export const fetchGroups = async (): Promise<Group[]> => {
       }
     });
 
+    // Fetch and apply Codex progress
+    const { data: progress } = await supabase.from('group_progress').select('*');
+    (progress || []).forEach((p: any) => {
+      if (p.group_id > 0 && p.group_id <= TOTAL_GROUPS) {
+        // Check if solved 20 stories (ids usually 1 to 20)
+        if (p.solved_ids && p.solved_ids.length >= 20) {
+          groups[p.group_id - 1].bonusCompleted = true;
+        }
+      }
+    });
+
     return groups;
   } catch (error: any) {
     console.error("fetchGroups error:", error.message || error);
