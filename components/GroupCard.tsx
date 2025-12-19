@@ -185,7 +185,7 @@ export const GroupCard: React.FC<GroupCardProps> = ({
 
         <div className="space-y-3">
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex justify-between items-center">
-            <span>Équipage ({group.members.length})</span>
+            <span>Groupe ({group.members.length})</span>
 
           </p>
           {group.members.length === 0 ? (
