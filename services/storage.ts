@@ -295,3 +295,39 @@ export const validateTitles = async (guesses: { id: number, title: string }[]): 
     return data || guesses.map(g => ({ id: g.id, is_correct: false }));
   } catch { return guesses.map(g => ({ id: g.id, is_correct: false })); }
 };
+
+export const getGlobalStats = async (): Promise<{ [key in ClassType]: number }> => {
+  try {
+    const { data: members, error } = await supabase.rpc('get_project_members');
+    if (error) throw error;
+
+    const stats = {
+      [ClassType.INGENIEUR]: 0,
+      [ClassType.MIND]: 0,
+      [ClassType.CLIC]: 0,
+    };
+
+    (members || []).forEach((u: any) => {
+      const cType = normalizeClassType(u.class_type);
+      if (stats[cType] !== undefined) {
+        stats[cType]++;
+      }
+    });
+
+    // Calculate remaining
+    const remaining = {
+      [ClassType.INGENIEUR]: Math.max(0, (TOTAL_GROUPS * QUOTAS[ClassType.INGENIEUR]) - stats[ClassType.INGENIEUR]),
+      [ClassType.MIND]: Math.max(0, (TOTAL_GROUPS * QUOTAS[ClassType.MIND]) - stats[ClassType.MIND]),
+      [ClassType.CLIC]: Math.max(0, (TOTAL_GROUPS * QUOTAS[ClassType.CLIC]) - stats[ClassType.CLIC]),
+    };
+
+    return remaining;
+  } catch (error) {
+    console.error("Error getting global stats:", error);
+    return {
+      [ClassType.INGENIEUR]: 0,
+      [ClassType.MIND]: 0,
+      [ClassType.CLIC]: 0,
+    };
+  }
+};
