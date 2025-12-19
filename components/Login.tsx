@@ -1,9 +1,9 @@
 
-import React, { useState } from 'react';
-import { User, ClassType } from '../types';
+import React, { useState, useEffect } from 'react';
+import { User, ClassType, DEFAULT_CORE_TEAM_DEADLINE } from '../types';
 import { Button } from './Button';
-import { UserCircle, Lock } from 'lucide-react';
-import { loginAndCheckUser } from '../services/storage';
+import { UserCircle, Lock, Clock, AlertTriangle, Users } from 'lucide-react';
+import { loginAndCheckUser, getGlobalStats } from '../services/storage';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -17,6 +17,36 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Urgency State
+  const [stats, setStats] = useState<{ [key in ClassType]: number } | null>(null);
+  const [timeLeft, setTimeLeft] = useState<{ d: number, h: number, m: number, s: number } | null>(null);
+
+  useEffect(() => {
+    // Load Stats
+    getGlobalStats().then(setStats);
+
+    // Timer Logic
+    const timer = setInterval(() => {
+      const now = new Date().getTime();
+      const target = DEFAULT_CORE_TEAM_DEADLINE.getTime();
+      const distance = target - now;
+
+      if (distance < 0) {
+        setTimeLeft({ d: 0, h: 0, m: 0, s: 0 });
+        clearInterval(timer);
+      } else {
+        setTimeLeft({
+          d: Math.floor(distance / (1000 * 60 * 60 * 24)),
+          h: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+          m: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+          s: Math.floor((distance % (1000 * 60)) / 1000)
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!firstName || !lastName || !password) return;
@@ -25,7 +55,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     // Prepare temp user object
     const tempUser: User = {
-      id: `${firstName.toLowerCase()}-${lastName.toLowerCase()}`, 
+      id: `${firstName.toLowerCase()}-${lastName.toLowerCase()}`,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       classType
@@ -46,7 +76,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-lg border border-gray-100">
         <div className="text-center">
           <div className="mx-auto h-16 w-16 bg-indigo-100 rounded-full flex items-center justify-center">
-             <UserCircle className="h-10 w-10 text-indigo-600" />
+            <UserCircle className="h-10 w-10 text-indigo-600" />
           </div>
           <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
             Connexion à la plateforme MIRA Challenge
@@ -54,6 +84,63 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <p className="mt-2 text-sm text-gray-600">
             Entrez vos coordonnées et définissez un mot de passe pour sécuriser votre choix.
           </p>
+        </div>
+
+        {/* URGENCY CARD */}
+        <div className="bg-slate-900 rounded-xl p-5 text-white shadow-xl border border-slate-700 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-2 opacity-10"><Clock className="w-24 h-24" /></div>
+
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="text-amber-400 w-5 h-5 animate-pulse" />
+            <h3 className="font-bold text-amber-400 uppercase tracking-widest text-xs">Statut de la Mission</h3>
+          </div>
+
+          {timeLeft && (
+            <div className="mb-6 text-center">
+              <p className="text-xs text-slate-400 uppercase mb-1">Verrouillage des équipes</p>
+              <div className="flex justify-center gap-4 text-center font-mono">
+                <div>
+                  <span className="text-2xl font-bold block">{timeLeft.d}</span>
+                  <span className="text-[10px] text-slate-500">Jours</span>
+                </div>
+                <div className="text-2xl font-bold">:</div>
+                <div>
+                  <span className="text-2xl font-bold block">{timeLeft.h.toString().padStart(2, '0')}</span>
+                  <span className="text-[10px] text-slate-500">Heures</span>
+                </div>
+                <div className="text-2xl font-bold">:</div>
+                <div>
+                  <span className="text-2xl font-bold block">{timeLeft.m.toString().padStart(2, '0')}</span>
+                  <span className="text-[10px] text-slate-500">Min</span>
+                </div>
+                <div className="text-2xl font-bold">:</div>
+                <div>
+                  <span className="text-2xl font-bold block text-amber-500">{timeLeft.s.toString().padStart(2, '0')}</span>
+                  <span className="text-[10px] text-slate-500">Sec</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {stats && (
+            <div className="space-y-3">
+              <p className="text-[10px] uppercase font-bold text-slate-500 border-b border-slate-800 pb-1 mb-2">Places Restantes (Temps Réel)</p>
+              {Object.values(ClassType).map((type) => {
+                const count = stats[type];
+                const isLow = count < 3;
+                return (
+                  <div key={type} className="flex justify-between items-center text-xs">
+                    <span className="text-slate-300 flex items-center gap-2">
+                      <Users className="w-3 h-3 text-slate-500" /> {type}
+                    </span>
+                    <span className={`font-bold px-2 py-0.5 rounded ${isLow ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                      {count} dispos
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (
@@ -99,9 +186,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               >
                 {Object.values(ClassType).map((type) => (
                   <option key={type} value={type}>
-                    {type === ClassType.MIND ? 'MIND (Communication)' : 
-                     type === ClassType.CLIC ? 'CLIC (Développement)' : 
-                     type}
+                    {type === ClassType.MIND ? 'MIND (Communication)' :
+                      type === ClassType.CLIC ? 'CLIC (Développement)' :
+                        type}
                   </option>
                 ))}
               </select>

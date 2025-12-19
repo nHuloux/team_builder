@@ -60,16 +60,15 @@ export const fetchGroups = async (): Promise<Group[]> => {
       } else if (row.key.startsWith('GROUP_MANIFESTO_')) {
         const id = parseInt(row.key.replace('GROUP_MANIFESTO_', ''));
         if (groups[id - 1]) groups[id - 1].manifesto = row.value;
-      }
-    });
-
-    // Fetch and apply Codex progress
-    const { data: progress } = await supabase.from('group_progress').select('*');
-    (progress || []).forEach((p: any) => {
-      if (p.group_id > 0 && p.group_id <= TOTAL_GROUPS) {
-        // Check if solved 20 stories (ids usually 1 to 20)
-        if (p.solved_ids && p.solved_ids.length >= 20) {
-          groups[p.group_id - 1].bonusCompleted = true;
+      } else if (row.key.startsWith('GROUP_BONUS_PROGRESS_')) {
+        const id = parseInt(row.key.replace('GROUP_BONUS_PROGRESS_', ''));
+        try {
+          const solvedIds = JSON.parse(row.value);
+          if (Array.isArray(solvedIds) && solvedIds.length >= 20) {
+            if (groups[id - 1]) groups[id - 1].bonusCompleted = true;
+          }
+        } catch (e) {
+          console.error("Error parsing bonus progress for group", id, e);
         }
       }
     });
