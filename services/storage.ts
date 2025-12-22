@@ -308,9 +308,11 @@ export const getGlobalStats = async (): Promise<{ [key in ClassType]: number }> 
     };
 
     (members || []).forEach((u: any) => {
-      const cType = normalizeClassType(u.class_type);
-      if (stats[cType] !== undefined) {
-        stats[cType]++;
+      if (u.group_id && u.group_id > 0) {
+        const cType = normalizeClassType(u.class_type);
+        if (stats[cType] !== undefined) {
+          stats[cType]++;
+        }
       }
     });
 
