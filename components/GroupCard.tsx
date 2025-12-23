@@ -133,9 +133,20 @@ export const GroupCard: React.FC<GroupCardProps> = ({
           )}
 
           {group.manifesto ? (
-            <p className="text-xs text-indigo-900 italic font-semibold mt-2 px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100 leading-relaxed shadow-sm">
-              "{group.manifesto}"
-            </p>
+            <div className="relative group/manifesto">
+              <p className="text-xs text-indigo-900 italic font-semibold mt-2 px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100 leading-relaxed shadow-sm">
+                "{group.manifesto}"
+              </p>
+              {userInGroup && !isGroupLocked && (
+                <button
+                  onClick={() => setIsEditingManifesto(true)}
+                  className="absolute -top-2 -right-2 bg-white p-1.5 rounded-full shadow-md border border-indigo-100 text-indigo-400 opacity-0 group-hover/manifesto:opacity-100 hover:text-indigo-600 transition-all scale-75 hover:scale-100"
+                  title="Modifier le manifeste"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           ) : hasFounderSeal && userInGroup && (
             <button
               onClick={() => setIsEditingManifesto(true)}
