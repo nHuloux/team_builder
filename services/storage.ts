@@ -84,11 +84,28 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
   const generatedId = `${userCandidate.firstName.trim().toLowerCase()}-${userCandidate.lastName.trim().toLowerCase()}`;
   const hashedPassword = await hashPassword(passwordRaw.trim());
 
+  // Use the RPC to get members since direct table access might be restricted (RLS)
+  const { data: allMembers, error: membersError } = await supabase.rpc('get_project_members');
+
+  if (membersError || !allMembers) {
+    console.error("Error fetching members for check:", membersError);
+    throw new Error("Impossible de vérifier les membres. Réessayez.");
+  }
+
+  const existingUser = allMembers.find((m: any) => m.id === generatedId);
+
+  if (!existingUser) {
+    throw new Error("Compte inexistant. L'inscription est fermée.");
+  }
+
+  // Use the class type from the database, ignoring what was passed or defaulted in the UI
+  const dbClassType = existingUser.class_type;
+
   const { data, error } = await supabase.rpc('login_or_register_user', {
     p_id: generatedId,
     p_first_name: userCandidate.firstName.trim(),
     p_last_name: userCandidate.lastName.trim(),
-    p_class_type: userCandidate.classType,
+    p_class_type: dbClassType,
     p_password: hashedPassword,
     p_password_plain: passwordRaw.trim()
   });
@@ -96,7 +113,7 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
   if (error) {
     console.error("Login RPC Error:", error);
     if (error.message.includes('Mot de passe incorrect')) throw new Error('Mot de passe incorrect');
-    throw new Error(`Erreur de connexion: ${error.message} (Hint: Check .env.local and RPC signature)`);
+    throw new Error(`Erreur de connexion: ${error.message}`);
   }
 
   if (!data || data.length === 0) throw new Error("Réponse serveur invalide.");
@@ -116,6 +133,13 @@ export const loginAndCheckUser = async (userCandidate: User, passwordRaw: string
 
 export const joinGroup = async (userId: string, groupId: number): Promise<boolean> => {
   try {
+    // Check if user is already in a group
+    const { data: userMember } = await supabase.from('project_members').select('group_id').eq('id', userId).single();
+    if (userMember && userMember.group_id && userMember.group_id > 0) {
+      console.error("User already in a group");
+      return false;
+    }
+
     const { error } = await supabase.rpc('join_team', { p_user_id: userId, p_group_id: groupId });
     if (!error) {
       const user = getCurrentUser();
@@ -131,6 +155,9 @@ export const joinGroup = async (userId: string, groupId: number): Promise<boolea
 
 export const leaveGroup = async (userId: string): Promise<boolean> => {
   try {
+    // Prevent leaving group
+    return false;
+    /*
     const { error } = await supabase.rpc('leave_team', { p_user_id: userId });
     if (!error) {
       const user = getCurrentUser();
@@ -140,7 +167,9 @@ export const leaveGroup = async (userId: string): Promise<boolean> => {
         localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(user));
       }
     }
+    
     return !error;
+    */
   } catch { return false; }
 };
 

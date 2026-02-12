@@ -263,23 +263,26 @@ export const GroupCard: React.FC<GroupCardProps> = ({
             <Button
               onClick={() => onJoin(group.id)}
               className="w-full font-bold uppercase tracking-wider py-4 shadow-md"
-              disabled={!permission.allowed || isGroupLocked}
-              variant={permission.allowed && !isGroupLocked ? 'primary' : 'outline'}
+              disabled={!permission.allowed || isGroupLocked || !!(currentUser.groupId && currentUser.groupId > 0)}
+              variant={permission.allowed && !isGroupLocked && (!currentUser.groupId || currentUser.groupId === 0) ? 'primary' : 'outline'}
             >
-              {isGroupLocked ? "Phase verrouillée" : (permission.allowed ? "Rejoindre le groupe" : 'Quota atteint')}
+              {isGroupLocked ? "Phase verrouillée" :
+                (currentUser.groupId && currentUser.groupId > 0) ? "Tu as déjà un groupe" :
+                  (permission.allowed ? "Rejoindre le groupe" : 'Quota atteint')}
             </Button>
-            {!permission.allowed && !isGroupLocked && <p className="text-[10px] text-red-500 text-center font-bold px-2 leading-tight">{permission.reason}</p>}
+            {!permission.allowed && !isGroupLocked && (!currentUser.groupId || currentUser.groupId === 0) && <p className="text-[10px] text-red-500 text-center font-bold px-2 leading-tight">{permission.reason}</p>}
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3 py-1">
-            {!isGroupLocked && (
+            {/* User cannot leave group anymore */}
+            {/* {!isGroupLocked && (
               <button
                 onClick={() => onLeave(group.id)}
                 className="text-xs font-bold text-red-500 hover:text-red-700 transition-colors flex items-center gap-2 bg-white px-4 py-2 rounded-lg border border-red-100 shadow-sm"
               >
                 <LogOut className="h-4 w-4" /> Quitter l'équipe
               </button>
-            )}
+            )} */}
             {isGroupLocked && (
               <p className="text-xs font-bold text-slate-800 uppercase tracking-tight flex items-center gap-2">
                 <Check className="w-4 h-4 text-green-500" /> Équipe constituée
